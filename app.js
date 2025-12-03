@@ -1,3 +1,6 @@
+// Server Side
+// app.js
+
 'use strict';
 
 //Set up express
@@ -22,6 +25,14 @@ app.get('/display', (req, res) => {
   res.render('display');
 });
 
+// Game State
+const gameState = {
+  stage: 'JOINING',  // JOINING, PROMPTS, ANSWERS, VOTING, RESULTS, SCORES, GAME_OVER
+  round: 1, 
+  players: [], // { id, username, score, isAdmin, socketId }
+  audience: [], // { id, username, socketId }
+}
+
 // URL of the backend API
 const BACKEND_ENDPOINT = process.env.BACKEND || 'http://localhost:8181';
 
@@ -39,13 +50,40 @@ function handleChat(message) {
     io.emit('chat',message);
 }
 
-const gameState = {
-  stage: 'JOINING',  // JOINING, PROMPTS, ANSWERS, VOTING, RESULTS, SCORES, GAME_OVER
-  round: 1, 
-  players: [], // { id, username, score, isAdmin, socketId }
-  audience: [], // { id, username, socketId }
+// Register
+function handleRegister(socket, data){
+  
+  
+
 }
 
+// Login
+function handleLogin(socket, data){
+
+}
+
+// Prompt
+function handlePrompt(socket, data){
+
+}
+
+// Answer
+function handleAnswer(socket, data){
+
+}
+
+// Vote
+function handleVote(socket, data){
+
+}
+
+// Next
+function handleNext(socket){
+
+}
+
+
+// Add player or audience depending on how many players there are (if gameState.players.length > 8 set player to audience else player)
 function addPlayerOrAudience(socket, username){
 
   if (gameState.players.length < 8 && gameState.stage == 'JOINING'){
@@ -70,7 +108,6 @@ function addPlayerOrAudience(socket, username){
       gameState.players.push(player)
   }
 
-
   else {
     const audienceMember = {
       id: socket.id,
@@ -84,21 +121,26 @@ function addPlayerOrAudience(socket, username){
 }
 
 
+// Receives events from connected clients (browsers)
+io.on('connection', socket => {
+  console.log('New connection:', socket.id);
 
+  socket.on('chat', message => { handleChat(message); });
 
+  socket.on('register', data => { handleRegister(socket, data); });
 
-//Handle new connection
-io.on('connection', socket => { 
-  console.log('New connection');
+  socket.on('login', data => { handleLogin(socket, data); });
 
-  //Handle on chat message received
-  socket.on('chat', message => {
-    handleChat(message);
-  });
+  socket.on('prompt', data => { handlePrompt(socket, data); });
 
-  //Handle disconnection
+  socket.on('answer', data => { handleAnswer(socket, data); });
+
+  socket.on('vote', data => { handleVote(socket, data); });
+
+  socket.on('next', () => { handleNext(socket); });
+
   socket.on('disconnect', () => {
-    console.log('Dropped connection');
+    console.log('Dropped connection:', socket.id);
   });
 });
 
