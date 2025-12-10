@@ -4,7 +4,6 @@
   <%- include('header'); -%>
 
   <div class="container">
-  
 
     <div id="game">
       <!-- Only once socket is connected -->
@@ -20,6 +19,11 @@
                    alt="Quiplash Logo"
                    class="game-logo">
             </div>
+
+            <!-- Optional error line -->
+            <p v-if="errorMessage" class="error-text">
+              {{ errorMessage }}
+            </p>
 
             <div class="form-group">
               <input type="text"
@@ -44,24 +48,526 @@
 
         <!-- ============ GAME UI AFTER LOGIN ============ -->
         <div v-else class="game-wrapper">
-          <h3>Chat</h3>
 
-          <div class="form-group">
-            <input type="text"
-                   @keyup.enter="chat()"
-                   v-model="chatmessage"
-                   class="form-control"
-                   placeholder="Type a message and press Enter">
-          </div>
-          <div class="form-group">
-            <button class="btn btn-primary" @click="chat">Send</button>
+          <!-- Global error (for nextResult, promptResult, etc.) -->
+          <p v-if="errorMessage" class="error-text">
+            {{ errorMessage }}
+          </p>
+
+          <!-- Small stage pill for context (NOT during PROMPTS, we show it in the side card there) -->
+          <p v-if="gameState && gameState.stage !== 'PROMPTS'" class="stage-indicator">
+            Stage: <strong>{{ gameState.stage }}</strong>
+            <span v-if="gameState.round">&nbsp;· Round {{ gameState.round }}</span>
+          </p>
+
+          <!-- ============ LOBBY VIEW (JOINING) ============ -->
+          <div v-if="gameState && gameState.stage === 'JOINING'" class="game-stage-wrapper">
+
+            <!-- LOBBY / WAITING CARD -->
+            <div class="lobby-card">
+              <div class="lobby-header">
+                <img src="/static/quiplash-logo.png"
+                     alt="Quiplash Logo"
+                     class="game-logo small-logo">
+                <h3 class="lobby-title">LOBBY</h3>
+              </div>
+
+              <p class="lobby-subtitle">
+                Hi <strong>{{ username }}</strong>, you’re in!
+              </p>
+
+              <p class="lobby-text">
+                Waiting for other players to join… When the host starts the game, your prompts
+                and answers will appear here.
+              </p>
+
+              <p class="lobby-hint">
+                Keep this tab open. You can chat with everyone in the lobby below.
+              </p>
+
+              <!-- Players list -->
+              <div class="lobby-list" v-if="lobbyPlayers.length">
+                <h5 class="lobby-list-title">
+                  Players ({{ lobbyPlayers.length }}/8)
+                </h5>
+                <ul class="lobby-list-ul">
+                  <li v-for="p in lobbyPlayers" :key="p.id">
+                    <span class="lobby-player-name">
+                      {{ p.username }}
+                      <span v-if="p.isAdmin">👑</span>
+                      <span v-if="p.username === username"> (you)</span>
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              <!-- Audience list -->
+              <div class="lobby-list" v-if="lobbyAudience.length">
+                <h5 class="lobby-list-title">
+                  Audience ({{ lobbyAudience.length }})
+                </h5>
+                <ul class="lobby-list-ul">
+                  <li v-for="a in lobbyAudience" :key="a.id">
+                    <span class="lobby-player-name">
+                      {{ a.username }}
+                    </span>
+                  </li>
+                </ul>
+              </div>
+
+              <!-- Admin controls -->
+              <div v-if="isAdmin" class="lobby-admin-controls">
+                <button class="btn btn-primary" @click="next">
+                  Start game / Next
+                </button>
+                <p class="admin-hint">
+                  You are the host. Tap this when everyone’s ready.
+                </p>
+              </div>
+            </div>
+
+            <!-- LOBBY CHAT -->
+            <div class="chat-card">
+              <h4 class="chat-title">Lobby Chat</h4>
+
+              <div class="form-group">
+                <input type="text"
+                       @keyup.enter="chat()
+                       "
+                       v-model="chatmessage"
+                       class="form-control"
+                       placeholder="Type a message and press Enter">
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" @click="chat">Send</button>
+              </div>
+
+              <ul id="chat">
+                <li v-for="(m, idx) in messages"
+                    :key="idx"
+                    :class="['chat-message', { 'my-message': m.username === username }]">
+
+                  <div class="chat-header">
+                    <div class="chat-avatar">
+                      {{ (m.username || '?')[0].toUpperCase() }}
+                    </div>
+                    <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                  </div>
+
+                  <div class="chat-text">
+                    {{ m.text }}
+                  </div>
+                </li>
+              </ul>
+            </div>
           </div>
 
-          <ul id="chat">
-            <li v-for="message in messages">{{ message }}</li>
-          </ul>
+          <!-- ============ PROMPTS STAGE – PROMPT ROW + CHAT ROW ============ -->
+          <div v-else-if="gameState && gameState.stage === 'PROMPTS'"
+               class="game-stage-wrapper">
+
+            <!-- ROW 1: Prompt card (centre) + Stage/Players on the right -->
+            <div class="prompts-row">
+              <!-- Prompt main card -->
+              <div class="prompt-main">
+                <div class="prompt-card">
+                  <div class="lobby-header">
+                    <img src="/static/quiplash-logo.png"
+                         alt="Quiplash Logo"
+                         class="game-logo small-logo">
+                    <h3 class="lobby-title">PROMPT STAGE</h3>
+                  </div>
+
+                  <p class="lobby-subtitle">
+                    Round {{ gameState.round }} – write a funny prompt for others to answer.
+                  </p>
+
+                  <p class="lobby-text">
+                    Think of a short setup that could lead to silly answers, for example:
+                    <em>"The worst thing to say to your driving instructor…"</em>
+                  </p>
+
+                  <div class="form-group">
+                    <textarea
+                      class="form-control"
+                      rows="4"
+                      v-model="promptText"
+                      placeholder="Type your prompt here..."
+                    ></textarea>
+                  </div>
+
+                  <div class="form-group button-row">
+                    <button
+                      class="btn btn-primary"
+                      :disabled="!promptText.trim()"
+                      @click="submitPrompt"
+                    >
+                      Submit prompt
+                    </button>
+                    <small class="text-muted" style="margin-left: 0.5rem;">
+                      You can usually submit at least one prompt per round.
+                    </small>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Stage & players side card -->
+              <div class="prompt-side">
+                <div class="status-card">
+                  <h4 class="chat-title">Stage &amp; Players</h4>
+
+                  <p class="status-subtitle">
+                    Stage: <strong>{{ gameState.stage }}</strong><br>
+                    <span v-if="gameState.round">Round {{ gameState.round }}</span>
+                  </p>
+
+                  <p class="status-subtitle">
+                    Players in this game:
+                  </p>
+
+                  <ul class="status-list" v-if="gameState.players && gameState.players.length">
+                    <li v-for="p in gameState.players" :key="p.id" class="status-item">
+                      <span class="status-name">
+                        {{ p.username }}
+                        <span v-if="p.isAdmin">👑</span>
+                        <span v-if="p.username === username"> (you)</span>
+                      </span>
+                      <span class="status-pill"
+                            :class="{
+                              'status-waiting': p.status !== 'PROMPT_SUBMITTED',
+                              'status-done': p.status === 'PROMPT_SUBMITTED'
+                            }">
+                        <span v-if="p.status === 'PROMPT_SUBMITTED'">Prompt submitted</span>
+                        <span v-else>Waiting…</span>
+                      </span>
+                    </li>
+                  </ul>
+
+                  <p v-else class="status-empty">
+                    No players found yet.
+                  </p>
+
+                  <!-- ADMIN NEXT BUTTON DURING PROMPTS -->
+                  <div v-if="isAdmin" class="lobby-admin-controls" style="margin-top: 10px;">
+                    <button class="btn btn-primary" @click="next">
+                      Next &rarr; Answers
+                    </button>
+                    <p class="admin-hint">
+                      Press this once everyone has submitted a prompt.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- ROW 2: Chat, full width, separate from prompt card -->
+            <div class="prompts-chat-row">
+              <div class="chat-card">
+                <h4 class="chat-title">Game Chat</h4>
+
+                <div class="form-group">
+                  <input type="text"
+                         @keyup.enter="chat()"
+                         v-model="chatmessage"
+                         class="form-control"
+                         placeholder="Type a message and press Enter">
+                </div>
+
+                <div class="form-group">
+                  <button class="btn btn-primary" @click="chat">Send</button>
+                </div>
+
+                <ul id="chat">
+                  <li v-for="(m, idx) in messages"
+                      :key="idx"
+                      :class="['chat-message', { 'my-message': m.username === username }]">
+
+                    <div class="chat-header">
+                      <div class="chat-avatar">
+                        {{ (m.username || '?')[0].toUpperCase() }}
+                      </div>
+                      <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                    </div>
+
+                    <div class="chat-text">
+                      {{ m.text }}
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ============ ANSWERS STAGE – SHOW ASSIGNED PROMPT + ANSWER BOX ============ -->
+          <div v-else-if="gameState && gameState.stage === 'ANSWERS'"
+               class="game-stage-wrapper">
+
+            <div class="prompts-row">
+              <!-- Centre: assigned prompt + answer box -->
+              <div class="prompt-main">
+                <div class="prompt-card">
+                  <div class="lobby-header">
+                    <img src="/static/quiplash-logo.png"
+                         alt="Quiplash Logo"
+                         class="game-logo small-logo">
+                    <h3 class="lobby-title">ANSWER STAGE</h3>
+                  </div>
+
+                  <!-- If this player has at least one assigned prompt -->
+                  <div v-if="myPlayer && myPlayer.assignedPrompts && myPlayer.assignedPrompts.length">
+                    <p class="lobby-subtitle">
+                      Your prompt:
+                    </p>
+                    <p class="lobby-text">
+                      <strong><em>{{ myPlayer.assignedPrompts[0].text }}</em></strong>
+                    </p>
+
+                    <div class="form-group">
+                      <textarea
+                        class="form-control"
+                        rows="4"
+                        v-model="answersDraft[myPlayer.assignedPrompts[0].id]"
+                        placeholder="Type your funniest answer here..."
+                      ></textarea>
+                    </div>
+
+                    <div class="form-group button-row">
+                      <button
+                        class="btn btn-primary"
+                        :disabled="!answersDraft[myPlayer.assignedPrompts[0].id] || !answersDraft[myPlayer.assignedPrompts[0].id].trim()"
+                        @click="submitAnswer(myPlayer.assignedPrompts[0].id)"
+                      >
+                        Submit answer
+                      </button>
+                    </div>
+                  </div>
+
+                  <!-- Fallback while assignments haven't arrived yet -->
+                  <div v-else>
+                    <p class="lobby-subtitle">
+                      Waiting for your prompt to be assigned…
+                    </p>
+                    <p class="lobby-text">
+                      The host has moved to the answer stage, but your prompt hasn’t reached you yet.
+                    </p>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Right: players + simple answer status -->
+              <div class="prompt-side">
+                <div class="status-card">
+                  <h4 class="chat-title">Players</h4>
+
+                  <p class="status-subtitle">
+                    Stage: <strong>{{ gameState.stage }}</strong><br>
+                    <span v-if="gameState.round">Round {{ gameState.round }}</span>
+                  </p>
+
+                  <ul class="status-list"
+                      v-if="gameState.players && gameState.players.length">
+                    <li v-for="p in gameState.players"
+                        :key="p.id"
+                        class="status-item">
+                      <span class="status-name">
+                        {{ p.username }}
+                        <span v-if="p.isAdmin">👑</span>
+                        <span v-if="p.username === username"> (you)</span>
+                      </span>
+                      <span class="status-pill"
+                            :class="{
+                              'status-waiting': p.status !== 'ANSWER_SUBMITTED',
+                              'status-done': p.status === 'ANSWER_SUBMITTED'
+                            }">
+                        <span v-if="p.status === 'ANSWER_SUBMITTED'">
+                          Answer submitted
+                        </span>
+                        <span v-else>
+                          Waiting…
+                        </span>
+                      </span>
+                    </li>
+                  </ul>
+
+                  <p v-else class="status-empty">
+                    No players found yet.
+                  </p>
+
+                  <!-- 🔹 ADMIN NEXT BUTTON DURING ANSWERS – GO TO VOTING -->
+                  <div v-if="isAdmin" class="lobby-admin-controls" style="margin-top: 10px;">
+                    <button class="btn btn-primary" @click="next">
+                      Next &rarr; Voting
+                    </button>
+                    <p class="admin-hint">
+                      Press this once everyone has submitted an answer.
+                    </p>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+
+            <!-- ROW 2: Chat, full width (same as other stages) -->
+            <div class="prompts-chat-row">
+              <div class="chat-card">
+                <h4 class="chat-title">Game Chat</h4>
+
+                <div class="form-group">
+                  <input type="text"
+                         @keyup.enter="chat()"
+                         v-model="chatmessage"
+                         class="form-control"
+                         placeholder="Type a message and press Enter">
+                </div>
+
+                <div class="form-group">
+                  <button class="btn btn-primary" @click="chat">Send</button>
+                </div>
+
+                <ul id="chat">
+                  <li v-for="(m, idx) in messages"
+                      :key="idx"
+                      :class="['chat-message', { 'my-message': m.username === username }]">
+
+                    <div class="chat-header">
+                      <div class="chat-avatar">
+                        {{ (m.username || '?')[0].toUpperCase() }}
+                      </div>
+                      <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                    </div>
+                    
+
+                    <div class="chat-text">
+                      {{ m.text }}
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+
+          </div>
+
+          <!-- ============ VOTING STAGE – SIMPLE VOTE BUTTON ============ -->
+          <div v-else-if="gameState && gameState.stage === 'VOTING'"
+               class="game-stage-wrapper">
+
+            <div class="lobby-card">
+              <div class="lobby-header">
+                <img src="/static/quiplash-logo.png"
+                     alt="Quiplash Logo"
+                     class="game-logo small-logo">
+                <h3 class="lobby-title">VOTING</h3>
+              </div>
+
+              <p class="lobby-subtitle">
+                Time to vote!
+              </p>
+
+              <p class="lobby-text">
+                (You can wire this up later to show prompts and answers. For now, this button just tells
+                the server to go to the next stage.)
+              </p>
+
+              <div class="form-group button-row">
+                <button class="btn btn-primary" @click="next">
+                  Finish voting / Next
+                </button>
+                <small class="text-muted" v-if="!isAdmin">
+                  Only the host’s button press actually advances the game.
+                </small>
+              </div>
+            </div>
+
+            <div class="chat-card">
+              <h4 class="chat-title">Game Chat</h4>
+
+              <div class="form-group">
+                <input type="text"
+                       @keyup.enter="chat()"
+                       v-model="chatmessage"
+                       class="form-control"
+                       placeholder="Type a message and press Enter">
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" @click="chat">Send</button>
+              </div>
+
+              <ul id="chat">
+                <li v-for="(m, idx) in messages"
+                    :key="idx"
+                    :class="['chat-message', { 'my-message': m.username === username }]">
+
+                  <div class="chat-header">
+                    <div class="chat-avatar">
+                      {{ (m.username || '?')[0].toUpperCase() }}
+                    </div>
+                    <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                  </div>
+
+                  <div class="chat-text">
+                    {{ m.text }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- ============ OTHER STAGES PLACEHOLDER ============ -->
+          <div v-else class="game-stage-wrapper">
+            <div class="lobby-card">
+              <div class="lobby-header">
+                <img src="/static/quiplash-logo.png"
+                     alt="Quiplash Logo"
+                     class="game-logo small-logo">
+                <h3 class="lobby-title">Game in progress</h3>
+              </div>
+              <p class="lobby-subtitle">
+                Current stage: <strong>{{ gameState && gameState.stage }}</strong>
+              </p>
+              <p class="lobby-text">
+                You can add custom UIs here later for VOTING, RESULTS, SCORES and GAME_OVER.
+              </p>
+            </div>
+
+            <div class="chat-card">
+              <h4 class="chat-title">Game Chat</h4>
+
+              <div class="form-group">
+                <input type="text"
+                       @keyup.enter="chat()"
+                       v-model="chatmessage"
+                       class="form-control"
+                       placeholder="Type a message and press Enter">
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" @click="chat">Send</button>
+              </div>
+
+              <ul id="chat">
+                <li v-for="(m, idx) in messages"
+                    :key="idx"
+                    :class="['chat-message', { 'my-message': m.username === username }]">
+
+                  <div class="chat-header">
+                    <div class="chat-avatar">
+                      {{ (m.username || '?')[0].toUpperCase() }}
+                    </div>
+                    <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                  </div>
+
+                  <div class="chat-text">
+                    {{ m.text }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
         </div>
-
       </div>
 
       <!-- While not connected yet -->
