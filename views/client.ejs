@@ -226,23 +226,35 @@
                     Players in this game:
                   </p>
 
-                  <ul class="status-list" v-if="gameState.players && gameState.players.length">
-                    <li v-for="p in gameState.players" :key="p.id" class="status-item">
-                      <span class="status-name">
-                        {{ p.username }}
-                        <span v-if="p.isAdmin">👑</span>
-                        <span v-if="p.username === username"> (you)</span>
-                      </span>
-                      <span class="status-pill"
-                            :class="{
-                              'status-waiting': p.status !== 'PROMPT_SUBMITTED',
-                              'status-done': p.status === 'PROMPT_SUBMITTED'
-                            }">
-                        <span v-if="p.status === 'PROMPT_SUBMITTED'">Prompt submitted</span>
-                        <span v-else>Waiting…</span>
-                      </span>
-                    </li>
-                  </ul>
+          <ul class="status-list"
+              v-if="gameState.players && gameState.players.length">
+            <li v-for="p in gameState.players"
+                :key="p.id"
+                class="status-item">
+              <span class="status-name">
+                {{ p.username }}
+                <span v-if="p.isAdmin">👑</span>
+                <span v-if="p.username === username"> (you)</span>
+              </span>
+
+              <!-- Scores: round + total -->
+              <div class="status-scores">
+                <small>
+                  Round: {{ p.roundScore || 0 }} · Total: {{ p.score || 0 }}
+                </small>
+              </div>
+
+              <span class="status-pill"
+                    :class="{
+                      'status-waiting': p.status !== 'PROMPT_SUBMITTED',
+                      'status-done': p.status === 'PROMPT_SUBMITTED'
+                    }">
+                <span v-if="p.status === 'PROMPT_SUBMITTED'">Prompt submitted</span>
+                <span v-else>Waiting…</span>
+              </span>
+            </li>
+          </ul>
+
 
                   <p v-else class="status-empty">
                     No players found yet.
@@ -378,30 +390,39 @@
                     <span v-if="gameState.round">Round {{ gameState.round }}</span>
                   </p>
 
-                  <ul class="status-list"
-                      v-if="gameState.players && gameState.players.length">
-                    <li v-for="p in gameState.players"
-                        :key="p.id"
-                        class="status-item">
-                      <span class="status-name">
-                        {{ p.username }}
-                        <span v-if="p.isAdmin">👑</span>
-                        <span v-if="p.username === username"> (you)</span>
-                      </span>
-                      <span class="status-pill"
-                            :class="{
-                              'status-waiting': p.status !== 'ANSWER_SUBMITTED',
-                              'status-done': p.status === 'ANSWER_SUBMITTED'
-                            }">
-                        <span v-if="p.status === 'ANSWER_SUBMITTED'">
-                          Answer submitted
-                        </span>
-                        <span v-else>
-                          Waiting…
-                        </span>
-                      </span>
-                    </li>
-                  </ul>
+              <ul class="status-list"
+                  v-if="gameState.players && gameState.players.length">
+                <li v-for="p in gameState.players"
+                    :key="p.id"
+                    class="status-item">
+                  <span class="status-name">
+                    {{ p.username }}
+                    <span v-if="p.isAdmin">👑</span>
+                    <span v-if="p.username === username"> (you)</span>
+                  </span>
+
+                  <!-- 🔹 NEW: round + total scores -->
+                  <div class="status-scores">
+                    <small>
+                      Round: {{ p.roundScore || 0 }} · Total: {{ p.score || 0 }}
+                    </small>
+                  </div>
+
+                  <span class="status-pill"
+                        :class="{
+                          'status-waiting': p.status !== 'ANSWER_SUBMITTED',
+                          'status-done': p.status === 'ANSWER_SUBMITTED'
+                        }">
+                    <span v-if="p.status === 'ANSWER_SUBMITTED'">
+                      Answer submitted
+                    </span>
+                    <span v-else>
+                      Waiting…
+                    </span>
+                  </span>
+                </li>
+              </ul>
+
 
                   <p v-else class="status-empty">
                     No players found yet.

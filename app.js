@@ -35,7 +35,7 @@ const BACKEND_ENDPOINT = process.env.BACKEND || 'http://localhost:8181';
 // ===== In-Memory Game State =====
 // This lives only in the Node server (reset when server restarts)
 const gameState = {
-  stage: 'JOINING',     // JOINING, PROMPTS, ANSWERS, VOTING, RESULTS, SCORES, GAME_OVER
+  stage: 'JOINING',     // JOINING, PROMPTS, ANSWERS, VOTING, SCORING, GAME_OVER
   round: 0,
   players: [],          // { id, username, score, isAdmin, socketId, state: {...} }
   audience: [],         // { id, username, socketId, state: {...} }
@@ -55,7 +55,7 @@ function startServer() {
 // ===== Utility: Public State & Broadcasts =====
 
 function assignPromptsToPlayers(players, prompts) {
-  // Simple helper: shuffle an array in-place
+  // 1. Shuffle helper
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -64,67 +64,61 @@ function assignPromptsToPlayers(players, prompts) {
     return arr;
   }
 
+  // 2. Prepare data
+  const shuffledPlayers = shuffle([...players]);
+  const shuffledPrompts = shuffle([...prompts]);
+
   const assignments = new Map();
   players.forEach(p => assignments.set(p.username, []));
 
-  // We keep a shuffled copy of prompts for randomness
-  const shuffledPrompts = shuffle([...prompts]);
+  // Helper to find a valid prompt (one that neither player wrote)
+  let promptIndex = 0;
 
-  const playerCount = players.length;
+  function getNextValidPrompt(playerA, playerB) {
+    for (let i = promptIndex; i < shuffledPrompts.length; i++) {
+      const pr = shuffledPrompts[i];
+      if (pr.author !== playerA.username && pr.author !== playerB.username) {
+        // swap to the front so we don't reuse it
+        [shuffledPrompts[i], shuffledPrompts[promptIndex]] =
+          [shuffledPrompts[promptIndex], shuffledPrompts[i]];
+        promptIndex++;
+        return shuffledPrompts[promptIndex - 1];
+      }
+    }
+    return null; // not enough valid prompts
+  }
+
+  const playerCount = shuffledPlayers.length;
   const isEven = playerCount % 2 === 0;
 
-  // For convenience, also shuffle players so assignment is fair-ish
-  const shuffledPlayers = shuffle([...players]);
-
   if (isEven) {
-    
-    // Each player gets exactly 1 prompt they did NOT write.
-    shuffledPlayers.forEach(player => {
-      // All prompts not authored by this player
-      const available = shuffledPrompts.filter(
-        pr => pr.author !== player.username
-      );
+    // EVEN: pair players (0,1), (2,3), ... each pair gets ONE shared prompt
+    for (let i = 0; i < playerCount; i += 2) {
+      const p1 = shuffledPlayers[i];
+      const p2 = shuffledPlayers[i + 1];
 
-      if (!available.length) {
-        // Edge case: everything is their own prompt (e.g. only 1 player) – give none.
-        console.log(
-          `No valid prompt (not authored by ${player.username}) found for even assignment.`
-        );
-        return;
+      const prompt = getNextValidPrompt(p1, p2);
+      if (prompt) {
+        assignments.get(p1.username).push(prompt);
+        assignments.get(p2.username).push(prompt);
       }
-
-      // Pick a random prompt from the available ones
-      const chosen = available[Math.floor(Math.random() * available.length)];
-      assignments.get(player.username).push(chosen);
-    });
+    }
   } else {
-    // ===== ODD NUMBER OF PLAYERS =====
-    // Each player gets up to 2 prompts they did NOT write.
-    shuffledPlayers.forEach(player => {
-      const available = shuffledPrompts.filter(
-        pr => pr.author !== player.username
-      );
+    // ODD: circular pairs (0,1), (1,2), ..., (last,0) – players can end up with 2 prompts
+    for (let i = 0; i < playerCount; i++) {
+      const p1 = shuffledPlayers[i];
+      const p2 = shuffledPlayers[(i + 1) % playerCount];
 
-      if (!available.length) {
-        console.log(
-          `No valid prompts (not authored by ${player.username}) for odd assignment.`
-        );
-        return;
+      const prompt = getNextValidPrompt(p1, p2);
+      if (prompt) {
+        assignments.get(p1.username).push(prompt);
+        assignments.get(p2.username).push(prompt);
       }
-
-      // Shuffle their available prompts and take up to 2
-      const local = shuffle([...available]);
-      const needed = Math.min(2, local.length);
-
-      for (let i = 0; i < needed; i++) {
-        assignments.get(player.username).push(local[i]);
-      }
-    });
+    }
   }
 
   return assignments;
 }
-
 
 // Returns public view of players (no private fields like socketId)
 function getPublicPlayers() {
@@ -142,14 +136,13 @@ function updateAll() {
   const publicPlayers = gameState.players.map(p => ({
     id: p.id,
     username: p.username,
-    score: p.score,
+    score: p.score,                    // total score
     isAdmin: p.isAdmin,
-
-    // ALL internal state sent to client:
     status: p.state.status,
     prompt: p.state.prompt,
     assignedPrompts: p.state.assignedPrompts,
     answers: p.state.answers,
+    roundScore: p.state.roundScore || 0, // per-round score (for UI)
   }));
 
   const publicAudience = gameState.audience.map(a => ({
@@ -166,8 +159,6 @@ function updateAll() {
     activePrompts: gameState.activePrompts,
   });
 }
-
-
 
 // Sends a standardised result object back to a single socket
 function sendApiResult(socket, eventName, { result, msg, username, isAdmin }) {
@@ -264,7 +255,7 @@ function addPlayerOrAudience(socket, username) {
     const player = {
       id: socket.id,
       username,
-      score: 0,
+      score: 0,              // total score (across rounds)
       isAdmin,
       socketId: socket.id,
       state: {
@@ -272,8 +263,9 @@ function addPlayerOrAudience(socket, username) {
         assignedPrompts: [],
         answers: {},
         votesCast: {},
-        roundScore: 0,
-        prompt: null, // single prompt text submitted during PROMPTS stage
+        roundVotes: 0,       // votes this round
+        roundScore: 0,       // per-round score
+        prompt: null,        // single prompt text submitted during PROMPTS stage
       },
     };
 
@@ -325,7 +317,6 @@ function handleChat(socket, message) {
 
 // ===== Auth Handling (Register / Login) =====
 
-// Handles /register from the client and calls Part 1 /player/register
 async function handleRegister(socket, data) {
   console.log('handleRegister: from socket', socket.id, 'data:', data);
   try {
@@ -349,7 +340,6 @@ async function handleRegister(socket, data) {
   }
 }
 
-// Handles /login from the client and calls Part 1 /player/login
 async function handleLogin(socket, data) {
   console.log('handleLogin: from socket', socket.id, 'data:', data);
   try {
@@ -379,7 +369,6 @@ async function handleLogin(socket, data) {
 
 // ===== Game Flow Helpers =====
 
-// Returns true if every player has status PROMPT_SUBMITTED
 function allPromptsSubmitted() {
   if (!gameState.players.length) return false;
   return gameState.players.every(
@@ -389,41 +378,50 @@ function allPromptsSubmitted() {
 
 function allAnswersSubmitted() {
   if (!gameState.players.length) return false;
-  return gameState.players.every(p => p.state.status === "ANSWER_SUBMITTED");
+  // for even player counts, each player has 1 assigned prompt;
+  // for odd, most players have 2. We treat "submitted" as:
+  //   user.state.answers has an entry for EVERY assigned prompt id.
+  return gameState.players.every(p => {
+    const assigned = p.state.assignedPrompts || [];
+    if (!assigned.length) return false;
+    return assigned.every(pr =>
+      Object.prototype.hasOwnProperty.call(p.state.answers || {}, pr.id)
+    );
+  });
 }
 
-
 // -----------------------------
-// NEW: startPromptStage()
+// startPromptStage()
 // -----------------------------
 function startPromptStage() {
-  console.log("Starting PROMPT stage");
+  console.log('Starting PROMPT stage');
 
-  gameState.stage = "PROMPTS";
+  gameState.stage = 'PROMPTS';
   gameState.round += 1;
 
   gameState.players.forEach(p => {
-    p.state.status = "WAITING_FOR_PROMPTS";
+    p.state.status = 'WAITING_FOR_PROMPTS';
     p.state.prompt = null;
     p.state.assignedPrompts = [];
     p.state.answers = {};
     p.state.votesCast = {};
+    p.state.roundVotes = 0;
     p.state.roundScore = 0;
   });
 
   gameState.audience.forEach(a => {
-    a.state.status = "AUDIENCE_WAITING";
+    a.state.status = 'AUDIENCE_WAITING';
   });
 
+  gameState.activePrompts = [];
   updateAll();
 }
 
-
 // -----------------------------
-// NEW: startAnswerStage()
+// startAnswerStage()
 // -----------------------------
 function startAnswerStage() {
-  console.log("Starting ANSWER stage");
+  console.log('Starting ANSWER stage');
 
   // Collect all prompts from players
   const prompts = gameState.players
@@ -435,66 +433,91 @@ function startAnswerStage() {
     }));
 
   if (prompts.length === 0) {
-    console.log("No prompts found, cannot start answer stage.");
+    console.log('No prompts found, cannot start answer stage.');
     return;
   }
 
   gameState.activePrompts = prompts;
 
-  // 🔹 Use the assignment helper
   const assignments = assignPromptsToPlayers(gameState.players, prompts);
 
-  // Update each player's state
   gameState.players.forEach(player => {
     const myPrompts = assignments.get(player.username) || [];
     player.state.assignedPrompts = myPrompts;
-    player.state.status = "WAITING_FOR_ANSWERS";
+    player.state.status = 'WAITING_FOR_ANSWERS';
     player.state.answers = {};
   });
 
-  gameState.stage = "ANSWERS";
+  gameState.stage = 'ANSWERS';
   updateAll();
 }
-
-
 
 // -----------------------------
 // startVotingStage()
 // -----------------------------
 function startVotingStage() {
-  console.log("Starting VOTING stage");
+  console.log('Starting VOTING stage');
 
-  gameState.stage = "VOTING";
+  gameState.stage = 'VOTING';
 
   gameState.players.forEach(p => {
-    p.state.status = "WAITING_FOR_VOTES";
+    p.state.status = 'WAITING_FOR_VOTES';
+    p.state.votesCast = p.state.votesCast || {};
+    p.state.roundVotes = p.state.roundVotes || 0;
   });
 
   updateAll();
 }
 
+// -----------------------------
+// endVotingAndScoreRound()
+// -----------------------------
+function endVotingAndScoreRound() {
+  console.log('Ending voting and computing round scores');
+
+  gameState.players.forEach(p => {
+    const votes = p.state.roundVotes || 0;
+    const points = gameState.round * votes * 100;
+
+    p.state.roundScore = points;
+
+    // make sure total exists; we DON'T add roundScore yet (per spec)
+    if (typeof p.score !== 'number') {
+      p.score = 0;
+    }
+  });
+
+  // For now, once all voting is done we move to a SCORING stage.
+  // (If you later add per-prompt voting, this is where you would
+  //  either advance to the next prompt or, when finished, go here.)
+  gameState.stage = 'SCORING';
+
+  updateAll();
+}
 
 // ===== Start Game (JOINING → PROMPTS) =====
 
 async function handleStartGame(socket) {
   console.log('Start game requested by', socket.id);
-
   const user = findUserBySocketId(socket.id);
+  if (!user || !user.isAdmin) {
+    socket.emit('nextResult', {
+      result: false,
+      msg: 'Only the admin can start the game.',
+    });
+    return;
+  }
 
-  
-  // When still in JOINING, move to PROMPTS
   if (gameState.stage === 'JOINING') {
     startPromptStage();
-
     socket.emit('nextResult', {
       result: true,
       msg: 'Game has started! Moving to prompt stage.',
     });
-    return;
   }
 }
 
-// ===== Advance Game (PROMPTS → ANSWERS → VOTING) =====
+// ===== Advance Game (PROMPTS → ANSWERS → VOTING → SCORING) =====
 
 function handleAdvanceGame(socket) {
   const user = findUserBySocketId(socket.id);
@@ -510,11 +533,11 @@ function handleAdvanceGame(socket) {
   console.log('handleAdvanceGame at stage:', gameState.stage);
 
   // PROMPTS → ANSWERS
-  if (gameState.stage === "PROMPTS") {
+  if (gameState.stage === 'PROMPTS') {
     if (!allPromptsSubmitted()) {
       socket.emit('nextResult', {
         result: false,
-        msg: "Not all players have submitted a prompt.",
+        msg: 'Not all players have submitted a prompt.',
       });
       return;
     }
@@ -523,27 +546,37 @@ function handleAdvanceGame(socket) {
 
     socket.emit('nextResult', {
       result: true,
-      msg: "Moving to ANSWERS stage."
+      msg: 'Moving to ANSWERS stage.',
     });
     return;
   }
 
   // ANSWERS → VOTING
-  if (gameState.stage === "ANSWERS") {
-
-    if (!allAnswersSubmitted){
+  if (gameState.stage === 'ANSWERS') {
+    if (!allAnswersSubmitted()) {
       socket.emit('nextResult', {
         result: false,
-        msg: "Not all players have submitted all their answers.",
+        msg: 'Not all answers have been submitted.',
       });
-      return;   
+      return;
     }
 
     startVotingStage();
 
     socket.emit('nextResult', {
       result: true,
-      msg: "Moving to VOTING stage."
+      msg: 'Moving to VOTING stage.',
+    });
+    return;
+  }
+
+  // VOTING → SCORING (end of voting)
+  if (gameState.stage === 'VOTING') {
+    endVotingAndScoreRound();
+
+    socket.emit('nextResult', {
+      result: true,
+      msg: 'Voting finished. Moving to SCORING.',
     });
     return;
   }
@@ -554,11 +587,8 @@ function handleAdvanceGame(socket) {
   });
 }
 
-
-
 // ===== Prompt Handling =====
 
-// (Your existing handlePrompt code stays EXACTLY as it is)
 async function handlePrompt(socket, data) {
   console.log('handlePrompt:', data);
   const user = findUserBySocketId(socket.id);
@@ -602,140 +632,123 @@ async function handlePrompt(socket, data) {
   }
 }
 
+// ===== Answer Handling =====
 
 async function handleAnswer(socket, data) {
   const user = findUserBySocketId(socket.id);
   if (!user) {
-    socket.emit("answerResult", { result: false, msg: "You are not in the game." });
+    socket.emit('answerResult', { result: false, msg: 'You are not in the game.' });
     return;
   }
 
-  if (gameState.stage !== "ANSWERS") {
-    socket.emit("answerResult", { result: false, msg: "Not answer stage." });
+  if (gameState.stage !== 'ANSWERS') {
+    socket.emit('answerResult', { result: false, msg: 'Not answer stage.' });
     return;
   }
 
-  // Safer validation: allow promptId = 0, require non-empty text
+  // allow promptId = 0, require non-empty text
   if (
     !data ||
-    typeof data.text !== "string" ||
+    typeof data.text !== 'string' ||
     !data.text.trim() ||
     data.promptId === undefined ||
     data.promptId === null
   ) {
-    socket.emit("answerResult", { result: false, msg: "Invalid answer." });
+    socket.emit('answerResult', { result: false, msg: 'Invalid answer.' });
     return;
   }
 
   const promptId = data.promptId;
   const text = data.text.trim();
 
-  // Ensure we have assignedPrompts
-  const myAssigned = user.state.assignedPrompts || [];
-  const hasThisPrompt = myAssigned.some(pr => pr.id === promptId);
-  if (!hasThisPrompt) {
-    socket.emit("answerResult", {
-      result: false,
-      msg: "That prompt is not assigned to you.",
-    });
-    return;
-  }
-
-  // Initialise answers if needed
   if (!user.state.answers) {
     user.state.answers = {};
   }
-
-  // Save / overwrite this prompt's answer
   user.state.answers[promptId] = text;
 
-  // Only mark ANSWER_SUBMITTED when ALL assigned prompts are answered
+  // after each answer, check if they've answered ALL their prompts
+  const myAssigned = user.state.assignedPrompts || [];
   const allAnswered =
     myAssigned.length > 0 &&
-    myAssigned.every(pr => Object.prototype.hasOwnProperty.call(user.state.answers, pr.id));
+    myAssigned.every(pr =>
+      Object.prototype.hasOwnProperty.call(user.state.answers, pr.id)
+    );
 
-  user.state.status = allAnswered ? "ANSWER_SUBMITTED" : "WAITING_FOR_ANSWERS";
+  if (allAnswered) {
+    user.state.status = 'ANSWER_SUBMITTED';
+  }
 
   console.log(`Answer from ${user.username} for prompt ${promptId}:`, text);
 
-  socket.emit("answerResult", { result: true, msg: "Answer submitted!" });
+  socket.emit('answerResult', { result: true, msg: 'Answer submitted!' });
   updateAll();
 
-  // Stage auto-advance signal (still requires EVERY player to be fully done)
   if (allAnswersSubmitted()) {
-    console.log("All answers in!");
-    io.emit("allAnswersReady");
+    console.log('All answers in!');
+    io.emit('allAnswersReady');
   }
 }
 
+// ===== Voting Handling =====
 
 function handleVote(socket, data) {
-  const user = findUserBySocketId(socket.id);
-
+  const user = findUserBySocketId(socket.id); // voter
   if (!user) {
     socket.emit('voteResult', { result: false, msg: 'You are not in the game.' });
     return;
   }
 
   if (gameState.stage !== 'VOTING') {
-    socket.emit('voteResult', { result: false, msg: 'You cannot vote right now.' });
+    socket.emit('voteResult', { result: false, msg: 'Not in voting stage.' });
     return;
   }
 
-  if (!data || data.promptId === undefined || data.promptId === null || !data.answerId) {
+  if (
+    !data ||
+    typeof data.promptId !== 'number' ||
+    (!data.targetUsername && !data.answerId)
+  ) {
     socket.emit('voteResult', { result: false, msg: 'Invalid vote.' });
     return;
   }
 
   const promptId = data.promptId;
-  const answerId = data.answerId; // we’re using the answerer’s username
+  // accept either field name from client
+  const targetUsername = data.targetUsername || data.answerId;
 
-  const promptObj = (gameState.activePrompts || []).find(p => p.id === promptId);
-  if (!promptObj) {
-    socket.emit('voteResult', { result: false, msg: 'Unknown prompt.' });
+  const targetPlayer = gameState.players.find(p => p.username === targetUsername);
+  if (!targetPlayer) {
+    socket.emit('voteResult', { result: false, msg: 'Target player not found.' });
     return;
   }
 
-  // 🚫 NEW: cannot vote for yourself
-  if (answerId === user.username) {
-    socket.emit('voteResult', {
-      result: false,
-      msg: 'You cannot vote for your own answer.',
-    });
+  // cannot vote for yourself
+  if (targetPlayer.username === user.username) {
+    socket.emit('voteResult', { result: false, msg: 'You cannot vote for your own answer.' });
     return;
   }
 
-  // Optional extra rule (only if you want):
-  // if (promptObj.author === user.username) {
-  //   socket.emit('voteResult', {
-  //     result: false,
-  //     msg: 'You cannot vote on your own prompt.',
-  //   });
-  //   return;
-  // }
-
-  user.state.votesCast = user.state.votesCast || {};
-  if (Object.prototype.hasOwnProperty.call(user.state.votesCast, promptId)) {
+  if (!user.state.votesCast) {
+    user.state.votesCast = {};
+  }
+  if (user.state.votesCast[promptId]) {
     socket.emit('voteResult', { result: false, msg: 'You already voted on this prompt.' });
     return;
   }
 
-  if (!gameState.votes) gameState.votes = {};
-  if (!gameState.votes[promptId]) gameState.votes[promptId] = {};
-  if (!gameState.votes[promptId][answerId]) gameState.votes[promptId][answerId] = 0;
-  gameState.votes[promptId][answerId] += 1;
+  // record vote
+  user.state.votesCast[promptId] = targetPlayer.username;
 
-  user.state.votesCast[promptId] = answerId;
+  if (!targetPlayer.state.roundVotes) {
+    targetPlayer.state.roundVotes = 0;
+  }
+  targetPlayer.state.roundVotes += 1;
 
-  console.log(
-    `Vote from ${user.username}: prompt ${promptId}, for answer by ${answerId}`
-  );
+  console.log(`Vote: ${user.username} -> ${targetPlayer.username} on prompt ${promptId}`);
 
-  socket.emit('voteResult', { result: true, msg: 'Vote recorded!' });
+  socket.emit('voteResult', { result: true, msg: 'Vote recorded.' });
   updateAll();
 }
-
-
 
 // ===== Socket.IO Wiring =====
 
@@ -748,14 +761,8 @@ io.on('connection', socket => {
   socket.on('register', data => handleRegister(socket, data));
   socket.on('login', data => handleLogin(socket, data));
   socket.on('prompt', data => handlePrompt(socket, data));
-
-  socket.on('answer', data => {
-    handleAnswer(socket, data)
-  });
-
-  socket.on('vote', data => {
-    handleVote(socket, data);
-  });
+  socket.on('answer', data => handleAnswer(socket, data));
+  socket.on('vote', data => handleVote(socket, data));
 
   socket.on('next', () => {
     if (gameState.stage === 'JOINING') {
@@ -774,7 +781,6 @@ io.on('connection', socket => {
     updateAll();
   });
 });
-
 
 // ===== Start Server =====
 
