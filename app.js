@@ -163,6 +163,7 @@ function updateAll() {
     round: gameState.round,
     players: publicPlayers,
     audience: publicAudience,
+    activePrompts: gameState.activePrompts,
   });
 }
 
