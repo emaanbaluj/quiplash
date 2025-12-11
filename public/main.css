@@ -8,19 +8,16 @@
 body {
   margin: 0;
   min-height: 100vh;
-
   background:
     radial-gradient(circle at 0% 0%,      rgba(34, 211, 238, 0.6) 0, transparent 55%),
     radial-gradient(circle at 100% 0%,    rgba(168, 85, 247, 0.6) 0, transparent 55%),
     radial-gradient(circle at 0% 100%,    rgba(249, 115, 22, 0.6) 0, transparent 55%),
     radial-gradient(circle at 100% 100%,  rgba(34, 197, 94, 0.6) 0, transparent 55%),
     linear-gradient(135deg, #020617, #0f172a 40%, #111827 65%, #020617);
-
   background-attachment: fixed;
   background-size: cover;
   color: #f9fafb;
   font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-
   display: flex;
   justify-content: center;
   align-items: center;
@@ -32,13 +29,11 @@ body {
   width: 100%;
   margin: 30px auto;
   padding: 20px 24px 26px;
-
   background: rgba(15, 23, 42, 0.96);
   border-radius: 24px;
   box-shadow:
     0 25px 50px rgba(0, 0, 0, 0.75),
     0 0 0 1px rgba(148, 163, 184, 0.25);
-
   display: flex;
   flex-direction: column;
 }
@@ -61,7 +56,7 @@ body {
   gap: 16px;
 }
 
-/* CARD SHELLS */
+/* UNIFIED CARD SHELL */
 
 .auth-card,
 .lobby-card,
@@ -73,35 +68,112 @@ body {
   border: 1px solid rgba(148, 163, 184, 0.28);
   padding: 18px 22px;
   box-shadow: 0 14px 30px rgba(0, 0, 0, 0.7);
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-start;
+  box-sizing: border-box;
+  height: 100%; /* For flex container alignment */
+  overflow-y: auto; /* Allow scrolling for content that exceeds height */
 }
+
+/* --- FIX: UNIFORM CARD SIZING --- */
+
+/* Parent container for all game stages (except PROMPTS/ANSWERS) */
+.game-stage-wrapper {
+  display: flex;
+  gap: 16px;
+  align-items: stretch; /* Stretch cards to match height */
+}
+
+/* Target the main content column wrapper for all stages */
+/* Use a fixed height that works for all main game views (Lobby, Vote, Score) */
+.lobby-card, /* Used in JOINING, VOTING, SCORING, GAME_OVER */
+.prompt-main { /* Used in PROMPTS, ANSWERS */
+  height: 600px; 
+  flex-shrink: 0;
+}
+
+/* Ensure prompt/answer card inside prompt-main takes full height */
+.prompt-main .prompt-card {
+  height: 100%;
+}
+
+/* Chat and Status cards must match the fixed height */
+.chat-card,
+.status-card {
+  height: 600px; /* Match fixed height of the main card */
+  flex-grow: 1; 
+  /* Chat window needs internal control for scrolling, not the card itself */
+  overflow-y: hidden;
+}
+
+/* Layout for PROMPTS and ANSWERS stages (two main rows) */
+.prompts-row {
+  display: flex;
+  gap: 16px;
+  height: 600px; /* Set height for the top row (prompt/answer + status) */
+}
+
+/* Adjustments for PROMPT/ANSWER stage columns */
+.prompt-main {
+  flex-basis: 65%; 
+  flex-grow: 1.5;
+  width: auto;
+}
+
+.prompt-side {
+  flex-basis: 35%; 
+  flex-grow: 1;
+  width: auto;
+}
+
+.prompts-chat-row {
+  margin-top: 16px;
+}
+
+/* --- END FIX: UNIFORM CARD SIZING --- */
 
 /* AUTH CARD */
 
 .logo-wrap {
   display: flex;
   justify-content: center;
-  margin-bottom: 8px;
+  align-items: center;
+  margin-bottom: 20px;
 }
 
-/* Logo sizes */
 .game-logo {
-  max-width: 180px;
+  max-width: 250px;
   height: auto;
-  filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.7));
 }
 
-.small-logo {
-  max-width: 120px;
+.game-logo.small-logo {
+  max-width: 60px;
+  margin-right: 12px;
+}
+
+.auth-card {
+  min-height: auto; 
   height: auto;
+}
+
+/* --- MESSAGE STYLES (New/Updated) --- */
+
+.message-text {
+  font-weight: bold;
+  text-align: center;
+  margin-bottom: 15px;
 }
 
 .error-text {
-  color: #fca5a5;
-  font-size: 13px;
-  margin-bottom: 8px;
+  color: #ef4444; /* Red */
 }
 
-/* Form fields */
+.positive-text {
+  color: #34d399; /* Green (Emerald 400) */
+}
+
+/* --- END MESSAGE STYLES --- */
 
 .form-group {
   margin-bottom: 12px;
@@ -109,380 +181,273 @@ body {
 
 .form-control {
   width: 100%;
-  border-radius: 999px;
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  background: #020617;
-  color: #e5e7eb;
   padding: 10px 14px;
-  font-size: 14px;
-  outline: none;
-  box-shadow: inset 0 0 0 1px transparent;
+  border-radius: 8px;
+  border: 1px solid #475569; 
+  background-color: #0f172a; 
+  color: #f8fafc; 
+  font-size: 16px;
+  box-sizing: border-box;
 }
 
-.form-control::placeholder {
-  color: #6b7280;
-}
-
-.form-control:focus {
-  border-color: #22c55e;
-  box-shadow: 0 0 0 1px rgba(34, 197, 94, 0.6);
-}
-
-/* Textarea tweak */
 textarea.form-control {
-  border-radius: 16px;
   resize: vertical;
 }
 
-/* Button row */
-.button-row {
-  display: flex;
-  gap: 10px;
-  align-items: center;
+.form-control::placeholder {
+  color: #94a3b8; 
 }
 
-/* Buttons */
+.button-row {
+  display: flex;
+  gap: 12px;
+  justify-content: flex-end;
+  margin-top: 16px;
+}
 
 .btn {
-  border-radius: 999px;
-  padding: 8px 18px;
-  font-size: 14px;
+  padding: 10px 20px;
   border: none;
+  border-radius: 8px;
+  font-weight: bold;
   cursor: pointer;
-  font-weight: 600;
-  margin-right: 4px;
-  transition:
-    background 0.12s ease-out,
-    transform 0.08s ease-out,
-    box-shadow 0.12s ease-out;
+  transition: background-color 0.2s, opacity 0.2s;
 }
 
 .btn-primary {
-  background: #22c55e;
-  color: #022c22;
-  box-shadow: 0 8px 14px rgba(34, 197, 94, 0.35);
+  background-color: #3b82f6; 
+  color: white;
 }
 
-.btn-primary:hover {
-  background: #16a34a;
-  transform: translateY(-1px);
-  box-shadow: 0 12px 20px rgba(34, 197, 94, 0.45);
-}
-
-.btn-primary:disabled {
-  opacity: 0.5;
-  cursor: default;
-  transform: none;
-  box-shadow: none;
+.btn-primary:hover:not(:disabled) {
+  background-color: #2563eb; 
 }
 
 .btn-secondary {
-  background: #0f172a;
-  color: #e5e7eb;
-  border: 1px solid #4b5563;
+  background-color: #64748b; 
+  color: white;
 }
 
-.btn-secondary:hover {
-  background: #111827;
+.btn-secondary:hover:not(:disabled) {
+  background-color: #475569; 
 }
 
-/* LOBBY CARD */
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* LOBBY/PROMPT/SCORE CARD STYLES */
 
 .lobby-header {
   display: flex;
   align-items: center;
-  gap: 14px;
-  margin-bottom: 8px;
+  margin-bottom: 16px;
 }
 
 .lobby-title {
   font-family: var(--font-arcade);
-  font-size: 18px;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+  font-size: 20px;
+  color: #facc15; 
+  letter-spacing: 0.1em;
   margin: 0;
 }
 
-.lobby-subtitle {
-  margin: 4px 0 4px;
-  font-size: 15px;
+.lobby-subtitle,
+.status-subtitle {
+  color: #e2e8f0; 
+  margin-top: 0;
+  margin-bottom: 10px;
+  line-height: 1.4;
 }
 
 .lobby-text {
-  margin: 4px 0;
+  color: #94a3b8; 
+  margin-bottom: 15px;
+  line-height: 1.5;
+}
+
+.lobby-hint,
+.admin-hint {
   font-size: 14px;
-  color: #d1d5db;
-}
-
-.lobby-hint {
+  color: #7dd3fc; 
   margin-top: 10px;
-  font-size: 12px;
-  color: #9ca3af;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-}
-
-/* Lobby list */
-
-.lobby-list {
-  margin-top: 10px;
-}
-
-.lobby-list-title {
-  font-size: 14px;
-  text-transform: uppercase;
-  letter-spacing: 0.08em;
-  margin-bottom: 4px;
-  color: #e5e7eb;
-}
-
-.lobby-list-ul {
-  list-style: none;
-  margin: 0;
-  padding-left: 0;
-}
-
-.lobby-player-name {
-  font-size: 13px;
-  color: #d1d5db;
-}
-
-/* Admin controls */
-
-.lobby-admin-controls {
-  margin-top: 12px;
+  font-style: italic;
 }
 
 .admin-hint {
-  margin-top: 4px;
-  font-size: 12px;
-  color: #9ca3af;
+  color: #fb923c; 
 }
 
-/* STAGE INDICATOR */
-
-.stage-indicator {
-  align-self: flex-start;
-  margin: 0 0 6px;
-  padding: 4px 10px;
-  border-radius: 999px;
-  font-size: 12px;
-  background: rgba(15, 23, 42, 0.8);
-  border: 1px solid rgba(148, 163, 184, 0.5);
-  color: #e5e7eb;
+.lobby-list {
+  margin-top: 20px;
 }
 
-/* GAME STAGE WRAPPER */
-
-.game-stage-wrapper {
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
+.lobby-list-title {
+  color: #facc15; 
+  margin-bottom: 8px;
 }
 
-/* PROMPTS / ANSWERS LAYOUT */
-
-.prompts-row {
-  display: flex;
-  gap: 2rem;
-  align-items: stretch;           /* ⬅ make children equal height */
-}
-
-/* Make the two columns themselves flex so inner cards can stretch */
-.prompt-main,
-.prompt-side {
-  display: flex;
-  flex-direction: column;
-}
-
-/* Wider main card, narrower side card */
-.prompt-main {
-  flex: 4;
-}
-
-.prompt-side {
-  flex: 1;
-}
-
-/* keep width full for cards, and make them fill column height */
-.prompt-card,
-.status-card {
-  width: 100%;
-  height: 100%;                  /* ⬅ stretch card to full column height */
-}
-
-/* Side status card content */
-
-.status-subtitle {
-  margin: 4px 0;
-  font-size: 13px;
-  color: #d1d5db;
-}
-
-.status-list {
-  list-style: none;
-  margin: 6px 0 0;
+.lobby-list-ul {
+  list-style-type: none;
   padding: 0;
 }
 
-.status-item {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 6px;
-  font-size: 13px;
+.lobby-list-ul li {
+  margin-bottom: 4px;
 }
 
-.status-name {
-  color: #e5e7eb;
+.lobby-player-name {
+  color: #cbd5e1; 
 }
 
-.status-pill {
-  padding: 3px 8px;
-  border-radius: 999px;
-  font-size: 11px;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
+.lobby-player-name span {
+  font-size: 0.9em;
 }
 
-.status-waiting {
-  background: rgba(55, 65, 81, 0.7);
-  color: #e5e7eb;
+.lobby-admin-controls {
+  margin-top: 25px;
+  padding-top: 15px;
+  border-top: 1px dashed rgba(148, 163, 184, 0.3);
 }
 
-.status-done {
-  background: rgba(34, 197, 94, 0.18);
-  color: #bbf7d0;
-  border: 1px solid rgba(34, 197, 94, 0.5);
-}
-
-.status-empty {
-  font-size: 13px;
-  color: #9ca3af;
-}
-
-/* Row 2 chat under prompts */
-
-.prompts-chat-row {
-  margin-top: 4px;
+/* STAGE INDICATOR */
+.stage-indicator {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  background: rgba(0, 0, 0, 0.5);
+  padding: 5px 10px;
+  border-radius: 5px;
+  color: #facc15;
+  font-size: 14px;
 }
 
 /* CHAT CARD */
 
 .chat-card {
-  background: radial-gradient(circle at top left, #0b1120, #020617);
-  border-radius: 20px;
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  padding: 18px 22px;
-  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.7);
-
-  height: 320px;
-  display: flex;
-  flex-direction: column;
+  padding: 16px;
 }
 
 .chat-title {
-  margin: 0 0 8px;
+  font-family: var(--font-arcade);
   font-size: 16px;
+  color: #34d399; 
+  margin-top: 0;
+  margin-bottom: 10px;
 }
-
-/* CHAT LIST + MESSAGES */
 
 #chat {
   list-style-type: none;
-  margin: 0;
-  padding: 8px;
-
-  flex: 1;
+  padding: 0;
+  margin-top: 10px;
+  height: 400px; /* Adjusted height relative to card height */
   overflow-y: auto;
-
-  background: radial-gradient(circle at top left, #020617, #020617);
-  border-radius: 14px;
-  border: 1px solid rgba(148, 163, 184, 0.3);
+  padding-right: 8px;
 }
 
-/* Single chat bubble */
 .chat-message {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-
-  margin-bottom: 6px;
-  padding: 8px 10px;
-
-  border-radius: 10px;
-  background: linear-gradient(135deg, #020617, #020617);
-  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
-
-  font-size: 13px;
-  color: #e5e7eb;
+  background: #1e293b; 
+  border-radius: 12px;
+  padding: 8px 12px;
+  margin-bottom: 10px;
+  max-width: 90%;
 }
 
-/* Highlight your own messages */
-.chat-message.my-message {
-  background: linear-gradient(135deg, #22c55e33, #22c55e11);
-  border: 1px solid rgba(34, 197, 94, 0.4);
+.my-message {
+  align-self: flex-end;
+  background: #3b82f6; 
 }
 
-/* Header row: avatar + username */
 .chat-header {
   display: flex;
   align-items: center;
-  gap: 6px;
+  margin-bottom: 4px;
 }
 
-/* Avatar circle */
 .chat-avatar {
-  width: 22px;
-  height: 22px;
-  border-radius: 999px;
-
+  width: 20px;
+  height: 20px;
+  background: #facc15;
+  border-radius: 50%;
+  color: #020617;
+  font-size: 12px;
+  font-weight: bold;
   display: flex;
-  align-items: center;
   justify-content: center;
-
-  font-size: 11px;
-  font-weight: 700;
-  color: #0b1120;
-
-  background: radial-gradient(circle at 30% 0%, #facc15, #22c55e);
-  box-shadow: 0 0 0 1px rgba(15, 23, 42, 0.9);
+  align-items: center;
+  margin-right: 6px;
 }
 
-/* Username label */
 .chat-username {
-  font-weight: 600;
-  letter-spacing: 0.02em;
-  text-transform: lowercase;
-  color: #e5e7eb;
+  font-weight: bold;
+  color: #facc15; 
+  font-size: 14px;
 }
 
-/* Body */
+.my-message .chat-username {
+  color: #e0f2f1; 
+}
+
 .chat-text {
-  margin-left: 28px;
-  color: #cbd5f5;
-  line-height: 1.25;
-  font-family: var(--font-terminal);
+  color: #e2e8f0;
+  font-size: 15px;
+  word-wrap: break-word;
 }
 
-/* Small muted */
-.text-muted {
-  color: #9ca3af;
+/* STATUS / PLAYER LISTS (PROMPTS/ANSWERS STAGES) */
+
+.status-card {
+  overflow-y: auto;
 }
 
-/* Responsive fix */
-@media (max-width: 700px) {
-  .prompts-row {
-    flex-direction: column;
-  }
+.status-list {
+  list-style-type: none;
+  padding: 0;
+  margin: 10px 0;
+}
 
-  .prompt-main,
-  .prompt-side {
-    height: auto;
-  }
+.status-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  padding: 6px 0;
+  border-bottom: 1px dotted rgba(148, 163, 184, 0.2);
+}
 
-  .prompt-card,
-  .status-card {
-    height: auto;
-  }
+.status-name {
+  color: #cbd5e1;
+  font-weight: bold;
+}
+
+.status-scores {
+  margin-left: auto;
+  margin-right: 10px;
+  text-align: right;
+}
+
+.status-pill {
+  padding: 3px 6px;
+  border-radius: 4px;
+  font-size: 12px;
+  font-weight: bold;
+  white-space: nowrap;
+}
+
+.status-waiting {
+  background-color: #fb923c; 
+  color: #020617;
+}
+
+.status-done {
+  background-color: #34d399; 
+  color: #020617;
+}
+
+.status-empty {
+  color: #64748b;
+  font-style: italic;
 }

@@ -3,7 +3,7 @@
 
 // ===== Imports & Setup =====
 
-// HTTP client for calling the Part 1 backend API (/player, /prompt, /utils, etc.)
+// HTTP client for calling the Part 1 backend API
 const axios = require('axios');
 
 // Express web server
@@ -15,36 +15,36 @@ const http = require('http');
 const server = http.Server(app);
 const io = require('socket.io')(server);
 
-// Use EJS templates and serve static files from /public
+// Configure EJS templates and serve static files
 app.set('view engine', 'ejs');
 app.use('/static', express.static('public'));
 
-// Main interactive client (player UI)
+// Main interactive client (player UI) route
 app.get('/', (req, res) => {
   res.render('client');
 });
 
-// Display client (projector / spectator UI)
+// Display client (projector / spectator UI) route
 app.get('/display', (req, res) => {
   res.render('display');
 });
 
-// URL of the Part 1 backend API (your Azure Functions)
+// URL of the Part 1 backend API (Azure Functions)
 const BACKEND_ENDPOINT = process.env.BACKEND || 'http://localhost:8181';
 
 // ===== In-Memory Game State =====
-// This lives only in the Node server (reset when server restarts)
+// Stores the current state of the game and all connected users.
 const gameState = {
   stage: 'JOINING',     // JOINING, PROMPTS, ANSWERS, VOTING, SCORING, GAME_OVER
   round: 0,
-  players: [],          // { id, username, score, isAdmin, socketId, state: {...} }
-  audience: [],         // { id, username, socketId, state: {...} }
-  activePrompts: [],    // prompts used in current round (filled after PROMPTS)
+  players: [],          // Active players in the game
+  audience: [],         // Spectators
+  activePrompts: [],    // Prompts currently being used in the round
 };
 
 // ===== Server Start =====
 
-// Starts the Node/Express/Socket.IO server
+// Starts the Node/Express/Socket.IO server listening on the configured port.
 function startServer() {
   const PORT = process.env.PORT || 8080;
   server.listen(PORT, () => {
@@ -54,8 +54,9 @@ function startServer() {
 
 // ===== Utility: Public State & Broadcasts =====
 
+// Assigns active prompts to players, ensuring they don't answer their own prompts.
 function assignPromptsToPlayers(players, prompts) {
-  // 1. Shuffle helper
+  // Helper functions for shuffling and finding valid prompts omitted for brevity.
   function shuffle(arr) {
     for (let i = arr.length - 1; i > 0; i--) {
       const j = Math.floor(Math.random() * (i + 1));
@@ -64,35 +65,31 @@ function assignPromptsToPlayers(players, prompts) {
     return arr;
   }
 
-  // 2. Prepare data
   const shuffledPlayers = shuffle([...players]);
   const shuffledPrompts = shuffle([...prompts]);
 
   const assignments = new Map();
   players.forEach(p => assignments.set(p.username, []));
 
-  // Helper to find a valid prompt (one that neither player wrote)
   let promptIndex = 0;
 
   function getNextValidPrompt(playerA, playerB) {
     for (let i = promptIndex; i < shuffledPrompts.length; i++) {
       const pr = shuffledPrompts[i];
       if (pr.author !== playerA.username && pr.author !== playerB.username) {
-        // swap to the front so we don't reuse it
         [shuffledPrompts[i], shuffledPrompts[promptIndex]] =
           [shuffledPrompts[promptIndex], shuffledPrompts[i]];
         promptIndex++;
         return shuffledPrompts[promptIndex - 1];
       }
     }
-    return null; // not enough valid prompts
+    return null;
   }
 
   const playerCount = shuffledPlayers.length;
   const isEven = playerCount % 2 === 0;
 
   if (isEven) {
-    // EVEN: pair players (0,1), (2,3), ... each pair gets ONE shared prompt
     for (let i = 0; i < playerCount; i += 2) {
       const p1 = shuffledPlayers[i];
       const p2 = shuffledPlayers[i + 1];
@@ -104,7 +101,6 @@ function assignPromptsToPlayers(players, prompts) {
       }
     }
   } else {
-    // ODD: circular pairs (0,1), (1,2), ..., (last,0) – players can end up with 2 prompts
     for (let i = 0; i < playerCount; i++) {
       const p1 = shuffledPlayers[i];
       const p2 = shuffledPlayers[(i + 1) % playerCount];
@@ -120,7 +116,7 @@ function assignPromptsToPlayers(players, prompts) {
   return assignments;
 }
 
-// Returns public view of players (no private fields like socketId)
+// Returns a public, filtered list of players for use in state updates.
 function getPublicPlayers() {
   return gameState.players.map(p => ({
     id: p.id,
@@ -131,22 +127,22 @@ function getPublicPlayers() {
   }));
 }
 
-// Broadcasts the current gameState to all connected sockets
+// Compiles and broadcasts the entire current game state to all connected clients.
 function updateAll() {
-  // base player info
   const publicPlayers = gameState.players.map(p => ({
     id: p.id,
     username: p.username,
-    score: p.score,                    // total score
+    score: p.score,
     isAdmin: p.isAdmin,
     status: p.state.status,
     prompt: p.state.prompt,
     assignedPrompts: p.state.assignedPrompts,
     answers: p.state.answers,
-    roundScore: p.state.roundScore || 0, // per-round score (for UI)
+    roundScore: p.state.roundScore || 0,
+    votesCast: p.state.votesCast,
   }));
 
-  // add rank based on total score (1 = best)
+  // Calculates rank based on total score.
   const sorted = [...publicPlayers].sort(
     (a, b) => (b.score || 0) - (a.score || 0)
   );
@@ -172,7 +168,7 @@ function updateAll() {
   });
 }
 
-// Sends a standardised result object back to a single socket
+// Sends a standardized result object back to a single socket after an action.
 function sendApiResult(socket, eventName, { result, msg, username, isAdmin }) {
   socket.emit(eventName, {
     result: result,
@@ -184,7 +180,7 @@ function sendApiResult(socket, eventName, { result, msg, username, isAdmin }) {
 
 // ===== Backend API Helpers (Part 1) =====
 
-// Generic helper to call Part 1 backend with axios
+// Generic helper to call the Part 1 backend API (Azure Functions).
 async function callBackend(path, method = 'get', data = undefined) {
   const url = `${BACKEND_ENDPOINT}${path}`;
 
@@ -209,7 +205,7 @@ async function callBackend(path, method = 'get', data = undefined) {
   }
 }
 
-// Calls Part 1 /player/register to create a new player
+// Calls the backend to register a new player.
 async function apiRegister(username, password) {
   return callBackend('/player/register', 'post', {
     username,
@@ -217,7 +213,7 @@ async function apiRegister(username, password) {
   });
 }
 
-// Calls Part 1 /player/login to validate username/password
+// Calls the backend to log in and authenticate a player.
 async function apiLogin(username, password) {
   return callBackend('/player/login', 'post', {
     username,
@@ -225,7 +221,7 @@ async function apiLogin(username, password) {
   });
 }
 
-// Calls Part 1 /prompt/create to store a new prompt in Cosmos
+// Calls the backend to store a new player-submitted prompt.
 async function apiPromptCreate(username, text, tags = []) {
   return callBackend('/prompt/create', 'post', {
     text,
@@ -234,7 +230,7 @@ async function apiPromptCreate(username, text, tags = []) {
   });
 }
 
-// Calls Part 1 /utils/get to fetch prompts by players and tags
+// Calls the backend to fetch existing prompts for round assembly (currently stubbed).
 async function apiUtilsGet(usernames, tagList = []) {
   return callBackend('/utils/get', 'get', {
     players: usernames,
@@ -242,7 +238,7 @@ async function apiUtilsGet(usernames, tagList = []) {
   });
 }
 
-// Stub that will eventually build 50% API prompts + 50% in-game prompts
+// Stub function for combining backend prompts and in-game prompts (WIP).
 async function buildRoundPrompts() {
   const players = getPublicPlayers();
   const usernames = players.map(p => p.username);
@@ -251,6 +247,7 @@ async function buildRoundPrompts() {
 
 // ===== Player / Audience Management =====
 
+// Finds a user (player or audience) in the game state by their socket ID.
 function findUserBySocketId(socketId) {
   return (
     gameState.players.find(p => p.socketId === socketId) ||
@@ -258,14 +255,16 @@ function findUserBySocketId(socketId) {
   );
 }
 
+// Adds a validated user as a player (if space/stage allows) or as an audience member.
 function addPlayerOrAudience(socket, username) {
-  if (gameState.players.length < 8 && gameState.stage === 'JOINING') {
-    const isAdmin = gameState.players.length === 0; // first player is admin
+  // If the lobby is open and has space, add as a player.
+  if (gameState.players.length < 4 && gameState.stage === 'JOINING') {
+    const isAdmin = gameState.players.length === 0;
 
     const player = {
       id: socket.id,
       username,
-      score: 0,              // total score (across rounds)
+      score: 0,
       isAdmin,
       socketId: socket.id,
       state: {
@@ -273,8 +272,8 @@ function addPlayerOrAudience(socket, username) {
         assignedPrompts: [],
         answers: {},
         votesCast: {},
-        roundVotes: 0,       // votes this round
-        roundScore: 0,       // per-round score
+        roundVotes: 0,
+        roundScore: 0,
         prompt: null,
       },
     };
@@ -285,6 +284,7 @@ function addPlayerOrAudience(socket, username) {
     updateAll();
     return player;
   } else {
+    // Otherwise, add as an audience member/spectator.
     const audienceMember = {
       id: socket.id,
       username,
@@ -302,6 +302,7 @@ function addPlayerOrAudience(socket, username) {
 
 // ===== Chat Handling =====
 
+// Receives a chat message from a socket and broadcasts it to all clients.
 function handleChat(socket, message) {
   const user = findUserBySocketId(socket.id);
 
@@ -326,11 +327,10 @@ function handleChat(socket, message) {
 
 // ===== Auth Handling (Register / Login) =====
 
+// Handles a player registration request by calling the backend API.
 async function handleRegister(socket, data) {
-  console.log('handleRegister: from socket', socket.id, 'data:', data);
   try {
     const result = await apiRegister(data.username, data.password);
-    console.log('Register result from backend:', result);
 
     sendApiResult(socket, 'registerResult', {
       result: result.result,
@@ -349,11 +349,10 @@ async function handleRegister(socket, data) {
   }
 }
 
+// Handles a player login request, validates credentials, and adds the user to the game state.
 async function handleLogin(socket, data) {
-  console.log('handleLogin: from socket', socket.id, 'data:', data);
   try {
     const result = await apiLogin(data.username, data.password);
-    console.log('Login result from backend:', result);
 
     let userObj = null;
     if (result.result) {
@@ -378,6 +377,7 @@ async function handleLogin(socket, data) {
 
 // ===== Game Flow Helpers =====
 
+// Checks if every player has submitted a prompt.
 function allPromptsSubmitted() {
   if (!gameState.players.length) return false;
   return gameState.players.every(
@@ -385,6 +385,7 @@ function allPromptsSubmitted() {
   );
 }
 
+// Checks if every player has submitted an answer for all their assigned prompts.
 function allAnswersSubmitted() {
   if (!gameState.players.length) return false;
   return gameState.players.every(p => {
@@ -396,14 +397,31 @@ function allAnswersSubmitted() {
   });
 }
 
+// Checks if every player has submitted vote for every single answer
+
+// Checks if every player has submitted vote for every single answer
+function allVotesSubmitted(){
+  if (!gameState.players.length || !gameState.activePrompts.length) return false;
+
+  const totalPromptsToVoteOn = gameState.activePrompts.length;
+
+
+  return gameState.players.every(p => {
+    const votesCast = p.state.votesCast || {};
+
+    return Object.keys(votesCast).length === totalPromptsToVoteOn;
+  });
+}
+
 // -----------------------------
 // startPromptStage()
 // -----------------------------
+// Resets player state and advances the game stage to PROMPTS, starting a new round.
 function startPromptStage() {
   console.log('Starting PROMPT stage');
 
   gameState.stage = 'PROMPTS';
-  gameState.round += 1;          // round 1,2,3,...
+  gameState.round += 1;
 
   gameState.players.forEach(p => {
     p.state.status = 'WAITING_FOR_PROMPTS';
@@ -413,6 +431,7 @@ function startPromptStage() {
     p.state.votesCast = {};
     p.state.roundVotes = 0;
     p.state.roundScore = 0;
+   
   });
 
   gameState.audience.forEach(a => {
@@ -426,6 +445,7 @@ function startPromptStage() {
 // -----------------------------
 // startAnswerStage()
 // -----------------------------
+// Aggregates submitted prompts, assigns them to players, and moves to the ANSWERS stage.
 function startAnswerStage() {
   console.log('Starting ANSWER stage');
 
@@ -460,6 +480,7 @@ function startAnswerStage() {
 // -----------------------------
 // startVotingStage()
 // -----------------------------
+// Changes the game stage to VOTING so players can cast votes on answers.
 function startVotingStage() {
   console.log('Starting VOTING stage');
 
@@ -477,11 +498,13 @@ function startVotingStage() {
 // -----------------------------
 // endVotingAndScoreRound()
 // -----------------------------
+// Calculates player scores based on votes received and updates the total score.
 function endVotingAndScoreRound() {
   console.log('Ending voting and computing round scores');
 
   gameState.players.forEach(p => {
     const votes = p.state.roundVotes || 0;
+    // Points calculation: round number * votes * 100
     const points = gameState.round * votes * 100;
 
     p.state.roundScore = points;
@@ -489,7 +512,6 @@ function endVotingAndScoreRound() {
     if (typeof p.score !== 'number') {
       p.score = 0;
     }
-    // accumulate total score across rounds
     p.score += points;
   });
 
@@ -499,8 +521,8 @@ function endVotingAndScoreRound() {
 
 // ===== Start Game (JOINING → PROMPTS) =====
 
+// Handles the host's request to start the game from the JOINING stage.
 async function handleStartGame(socket) {
-  console.log('Start game requested by', socket.id);
   const user = findUserBySocketId(socket.id);
   if (!user || !user.isAdmin) {
     socket.emit('nextResult', {
@@ -521,6 +543,12 @@ async function handleStartGame(socket) {
 
 // ===== Advance Game (PROMPTS → ANSWERS → VOTING → SCORING → next round / GAME_OVER) =====
 
+// Manages the flow of the game between stages, triggered only by the host.
+// app.js (updated handleAdvanceGame)
+
+// ... (other functions)
+
+// Manages the flow of the game between stages, triggered only by the host.
 function handleAdvanceGame(socket) {
   const user = findUserBySocketId(socket.id);
 
@@ -532,9 +560,7 @@ function handleAdvanceGame(socket) {
     return;
   }
 
-  console.log('handleAdvanceGame at stage:', gameState.stage);
-
-  // PROMPTS → ANSWERS
+  // PROMPTS → ANSWERS: Checks if all prompts are submitted before advancing.
   if (gameState.stage === 'PROMPTS') {
     if (!allPromptsSubmitted()) {
       socket.emit('nextResult', {
@@ -543,9 +569,7 @@ function handleAdvanceGame(socket) {
       });
       return;
     }
-
     startAnswerStage();
-
     socket.emit('nextResult', {
       result: true,
       msg: 'Moving to ANSWERS stage.',
@@ -553,7 +577,7 @@ function handleAdvanceGame(socket) {
     return;
   }
 
-  // ANSWERS → VOTING
+  // ANSWERS → VOTING: Checks if all answers are submitted before advancing.
   if (gameState.stage === 'ANSWERS') {
     if (!allAnswersSubmitted()) {
       socket.emit('nextResult', {
@@ -562,9 +586,7 @@ function handleAdvanceGame(socket) {
       });
       return;
     }
-
     startVotingStage();
-
     socket.emit('nextResult', {
       result: true,
       msg: 'Moving to VOTING stage.',
@@ -572,10 +594,16 @@ function handleAdvanceGame(socket) {
     return;
   }
 
-  // VOTING → SCORING (end of voting for the round)
+  // VOTING → SCORING: Checks if all votes are submitted and computes scores.
   if (gameState.stage === 'VOTING') {
+    if (!allVotesSubmitted()) {
+      socket.emit('nextResult', {
+        result: false,
+        msg: 'Not all players have cast their votes yet.',
+      });
+      return;
+    }
     endVotingAndScoreRound();
-
     socket.emit('nextResult', {
       result: true,
       msg: 'Voting finished. Showing scores.',
@@ -583,19 +611,16 @@ function handleAdvanceGame(socket) {
     return;
   }
 
-  // SCORING → next round OR GAME_OVER
+  // SCORING → next round OR GAME_OVER: Checks if max rounds (3) is reached.
   if (gameState.stage === 'SCORING') {
     if (gameState.round >= 3) {
-      // after 3 rounds, game over – leaderboard is final
       gameState.stage = 'GAME_OVER';
       updateAll();
-
       socket.emit('nextResult', {
         result: true,
         msg: 'All 3 rounds complete. Game over!',
       });
     } else {
-      // start another round of prompts
       startPromptStage();
       socket.emit('nextResult', {
         result: true,
@@ -613,22 +638,12 @@ function handleAdvanceGame(socket) {
 
 // ===== Prompt Handling =====
 
+// Handles a player's prompt submission, validates it, and saves it via the backend API.
 async function handlePrompt(socket, data) {
-  console.log('handlePrompt:', data);
   const user = findUserBySocketId(socket.id);
 
-  if (!user) {
-    socket.emit('promptResult', { result: false, msg: 'You are not in the game.' });
-    return;
-  }
-
-  if (gameState.stage !== 'PROMPTS') {
-    socket.emit('promptResult', { result: false, msg: `Cannot submit prompts during ${gameState.stage}` });
-    return;
-  }
-
-  if (user.state.status === 'PROMPT_SUBMITTED') {
-    socket.emit('promptResult', { result: false, msg: 'You already submitted a prompt.' });
+  if (!user || gameState.stage !== 'PROMPTS' || user.state.status === 'PROMPT_SUBMITTED') {
+    socket.emit('promptResult', { result: false, msg: 'Cannot submit prompt now or already submitted.' });
     return;
   }
 
@@ -658,37 +673,21 @@ async function handlePrompt(socket, data) {
 
 // ===== Answer Handling =====
 
+// Handles a player's answer submission for an assigned prompt.
 async function handleAnswer(socket, data) {
   const user = findUserBySocketId(socket.id);
-  if (!user) {
-    socket.emit('answerResult', { result: false, msg: 'You are not in the game.' });
-    return;
-  }
-
-  if (gameState.stage !== 'ANSWERS') {
-    socket.emit('answerResult', { result: false, msg: 'Not answer stage.' });
-    return;
-  }
-
-  if (
-    !data ||
-    typeof data.text !== 'string' ||
-    !data.text.trim() ||
-    data.promptId === undefined ||
-    data.promptId === null
-  ) {
-    socket.emit('answerResult', { result: false, msg: 'Invalid answer.' });
+  if (!user || gameState.stage !== 'ANSWERS' || !data || !data.text || data.promptId === undefined) {
+    socket.emit('answerResult', { result: false, msg: 'Invalid answer or not the answer stage.' });
     return;
   }
 
   const promptId = data.promptId;
   const text = data.text.trim();
 
-  if (!user.state.answers) {
-    user.state.answers = {};
-  }
+  user.state.answers = user.state.answers || {};
   user.state.answers[promptId] = text;
 
+  // Check if all assigned prompts have been answered by this player.
   const myAssigned = user.state.assignedPrompts || [];
   const allAnswered =
     myAssigned.length > 0 &&
@@ -700,37 +699,21 @@ async function handleAnswer(socket, data) {
     user.state.status = 'ANSWER_SUBMITTED';
   }
 
-  console.log(`Answer from ${user.username} for prompt ${promptId}:`, text);
-
   socket.emit('answerResult', { result: true, msg: 'Answer submitted!' });
   updateAll();
 
   if (allAnswersSubmitted()) {
-    console.log('All answers in!');
-    io.emit('allAnswersReady');
+    io.emit('allAnswersReady'); // Notify display/host that answers are complete
   }
 }
 
 // ===== Voting Handling =====
 
+// Handles a player's vote for an answer, ensuring they don't vote for themselves or multiple times.
 function handleVote(socket, data) {
-  const user = findUserBySocketId(socket.id); // voter
-  if (!user) {
-    socket.emit('voteResult', { result: false, msg: 'You are not in the game.' });
-    return;
-  }
-
-  if (gameState.stage !== 'VOTING') {
-    socket.emit('voteResult', { result: false, msg: 'Not in voting stage.' });
-    return;
-  }
-
-  if (
-    !data ||
-    typeof data.promptId !== 'number' ||
-    (!data.targetUsername && !data.answerId)
-  ) {
-    socket.emit('voteResult', { result: false, msg: 'Invalid vote.' });
+  const user = findUserBySocketId(socket.id);
+  if (!user || gameState.stage !== 'VOTING' || !data || data.promptId === undefined) {
+    socket.emit('voteResult', { result: false, msg: 'Invalid vote or not in voting stage.' });
     return;
   }
 
@@ -738,32 +721,20 @@ function handleVote(socket, data) {
   const targetUsername = data.targetUsername || data.answerId;
 
   const targetPlayer = gameState.players.find(p => p.username === targetUsername);
-  if (!targetPlayer) {
-    socket.emit('voteResult', { result: false, msg: 'Target player not found.' });
+  if (!targetPlayer || targetPlayer.username === user.username) {
+    socket.emit('voteResult', { result: false, msg: 'Cannot vote for yourself or invalid target.' });
     return;
   }
 
-  if (targetPlayer.username === user.username) {
-    socket.emit('voteResult', { result: false, msg: 'You cannot vote for your own answer.' });
-    return;
-  }
-
-  if (!user.state.votesCast) {
-    user.state.votesCast = {};
-  }
+  user.state.votesCast = user.state.votesCast || {};
   if (user.state.votesCast[promptId]) {
     socket.emit('voteResult', { result: false, msg: 'You already voted on this prompt.' });
     return;
   }
 
+  // Record vote and increment target's vote count
   user.state.votesCast[promptId] = targetPlayer.username;
-
-  if (!targetPlayer.state.roundVotes) {
-    targetPlayer.state.roundVotes = 0;
-  }
-  targetPlayer.state.roundVotes += 1;
-
-  console.log(`Vote: ${user.username} -> ${targetPlayer.username} on prompt ${promptId}`);
+  targetPlayer.state.roundVotes = (targetPlayer.state.roundVotes || 0) + 1;
 
   socket.emit('voteResult', { result: true, msg: 'Vote recorded.' });
   updateAll();
@@ -771,10 +742,11 @@ function handleVote(socket, data) {
 
 // ===== Socket.IO Wiring =====
 
+// Sets up handlers for incoming socket events (chat, login, game actions, etc.).
 io.on('connection', socket => {
   console.log('New connection:', socket.id);
 
-  updateAll();
+  updateAll(); // Send initial state to the new client
 
   socket.on('chat', msg => handleChat(socket, msg));
   socket.on('register', data => handleRegister(socket, data));
@@ -783,6 +755,7 @@ io.on('connection', socket => {
   socket.on('answer', data => handleAnswer(socket, data));
   socket.on('vote', data => handleVote(socket, data));
 
+  // Handles 'next' button click from the host to start or advance the game.
   socket.on('next', () => {
     if (gameState.stage === 'JOINING') {
       handleStartGame(socket);
@@ -791,13 +764,14 @@ io.on('connection', socket => {
     }
   });
 
+  // Handles client disconnection by removing the user from the game state.
   socket.on('disconnect', () => {
     console.log('Dropped connection:', socket.id);
 
     gameState.players = gameState.players.filter(p => p.socketId !== socket.id);
     gameState.audience = gameState.audience.filter(a => a.socketId !== socket.id);
 
-    updateAll();
+    updateAll(); // Broadcast state change
   });
 });
 

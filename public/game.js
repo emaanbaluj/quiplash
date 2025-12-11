@@ -32,6 +32,7 @@ var app = new Vue({
 
     // global error/info line
     errorMessage: '',
+    isPositiveMessage: true, // Controls the color class (true = green, false = red)
   },
 
   mounted: function () {
@@ -159,12 +160,14 @@ function connect() {
     console.log('[CLIENT] connected, socket.id =', socket.id);
     app.connected = true;
     app.errorMessage = '';
+    app.isPositiveMessage = true; 
   });
 
   socket.on('connect_error', function (err) {
     console.log('[CLIENT] connect_error:', err);
     app.errorMessage = 'Unable to connect to server.';
     app.connected = false;
+    app.isPositiveMessage = false; 
   });
 
   socket.on('disconnect', function (reason) {
@@ -173,6 +176,7 @@ function connect() {
     app.loggedIn = false;
     app.isAdmin = false;
     app.errorMessage = 'Disconnected from server.';
+    app.isPositiveMessage = false; 
   });
 
   // chat from server
@@ -196,12 +200,14 @@ function connect() {
     if (res.result) {
       app.loggedIn = true;
       app.errorMessage = '';
+      app.isPositiveMessage = true; 
       app.username = res.username || app.username;
       app.isAdmin = !!res.isAdmin;
     } else {
       app.loggedIn = false;
       app.isAdmin = false;
       app.errorMessage = 'Login failed: ' + (res.msg || 'Unknown error');
+      app.isPositiveMessage = false; 
     }
   });
 
@@ -211,8 +217,10 @@ function connect() {
 
     if (res.result) {
       app.errorMessage = 'Registered OK: ' + (res.msg || '');
+      app.isPositiveMessage = true; 
     } else {
       app.errorMessage = 'Registration failed: ' + (res.msg || 'Unknown error');
+      app.isPositiveMessage = false; 
     }
   });
 
@@ -223,8 +231,10 @@ function connect() {
     if (res.result) {
       app.promptText = '';
       app.errorMessage = res.msg || 'Prompt submitted!';
+      app.isPositiveMessage = true; 
     } else {
       app.errorMessage = res.msg || 'Prompt failed.';
+      app.isPositiveMessage = false; 
     }
   });
 
@@ -236,8 +246,35 @@ function connect() {
       // we still clear the legacy field; harmless
       app.answerText = '';
       app.errorMessage = res.msg || 'Answer submitted!';
+      app.isPositiveMessage = true; 
     } else {
       app.errorMessage = res.msg || 'Answer failed.';
+      app.isPositiveMessage = false; 
+    }
+  });
+
+  // NEW: vote result
+  socket.on('voteResult', function (res) {
+    console.log('[CLIENT] voteResult:', res);
+
+    if (res.result) {
+      app.errorMessage = res.msg || 'Vote cast!';
+      app.isPositiveMessage = true;
+
+      // CRITICAL FIX: If the vote succeeded, update the local player state
+      // This forces the UI to refresh, disabling buttons and showing (Voted)
+      if (app.myPlayer && res.promptId !== undefined) {
+          if (!app.myPlayer.votesCast) {
+              app.myPlayer.votesCast = {};
+          }
+          // Use Vue.set for reactivity when adding a new property to an object
+          // This assumes the server's res includes 'promptId'
+          Vue.set(app.myPlayer.votesCast, res.promptId, res.answerId || 'voted');
+      }
+
+    } else {
+      app.errorMessage = res.msg || 'Voting failed.';
+      app.isPositiveMessage = false;
     }
   });
 
@@ -247,8 +284,10 @@ function connect() {
 
     if (res.result) {
       app.errorMessage = '';
+      app.isPositiveMessage = true; 
     } else {
       app.errorMessage = res.msg || 'Error advancing game';
+      app.isPositiveMessage = false; 
     }
   });
 }
