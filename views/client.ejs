@@ -315,34 +315,46 @@
                     <h3 class="lobby-title">ANSWER STAGE</h3>
                   </div>
 
-                  <!-- If this player has at least one assigned prompt -->
-                  <div v-if="myPlayer && myPlayer.assignedPrompts && myPlayer.assignedPrompts.length">
-                    <p class="lobby-subtitle">
-                      Your prompt:
-                    </p>
-                    <p class="lobby-text">
-                      <strong><em>{{ myPlayer.assignedPrompts[0].text }}</em></strong>
-                    </p>
+          <!-- If this player has at least one assigned prompt -->
+          <div v-if="myPlayer && myPlayer.assignedPrompts && myPlayer.assignedPrompts.length">
+            <p class="lobby-subtitle">
+              You have {{ myPlayer.assignedPrompts.length }} prompt<span v-if="myPlayer.assignedPrompts.length > 1">s</span> to answer.
+            </p>
 
-                    <div class="form-group">
-                      <textarea
-                        class="form-control"
-                        rows="4"
-                        v-model="answersDraft[myPlayer.assignedPrompts[0].id]"
-                        placeholder="Type your funniest answer here..."
-                      ></textarea>
-                    </div>
+            <!-- One answer card per assigned prompt -->
+            <div
+              v-for="ap in myPlayer.assignedPrompts"
+              :key="ap.id"
+              class="answer-card"
+              style="margin-bottom: 16px; border-top: 1px solid rgba(148,163,184,0.3); padding-top: 10px;"
+            >
+              <p class="lobby-subtitle">
+                Prompt:
+              </p>
+              <p class="lobby-text">
+                <strong><em>{{ ap.text }}</em></strong>
+              </p>
 
-                    <div class="form-group button-row">
-                      <button
-                        class="btn btn-primary"
-                        :disabled="!answersDraft[myPlayer.assignedPrompts[0].id] || !answersDraft[myPlayer.assignedPrompts[0].id].trim()"
-                        @click="submitAnswer(myPlayer.assignedPrompts[0].id)"
-                      >
-                        Submit answer
-                      </button>
-                    </div>
-                  </div>
+              <div class="form-group">
+                <textarea
+                  class="form-control"
+                  rows="3"
+                  v-model="answersDraft[ap.id]"
+                  :placeholder="'Type your answer for this prompt...'"
+                ></textarea>
+              </div>
+
+              <div class="form-group button-row">
+                <button
+                  class="btn btn-primary"
+                  :disabled="!answersDraft[ap.id] || !answersDraft[ap.id].trim()"
+                  @click="submitAnswer(ap.id)"
+                >
+                  Submit answer
+                </button>
+              </div>
+            </div>
+          </div>
 
                   <!-- Fallback while assignments haven't arrived yet -->
                   <div v-else>
