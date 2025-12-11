@@ -603,6 +603,170 @@
   </div>
 </div>
 
+          <!-- ============ SCORING STAGE – ROUND SCORES + TOTALS ============ -->
+          <div v-else-if="gameState && gameState.stage === 'SCORING'"
+               class="game-stage-wrapper">
+
+            <div class="lobby-card">
+              <div class="lobby-header">
+                <img src="/static/quiplash-logo.png"
+                     alt="Quiplash Logo"
+                     class="game-logo small-logo">
+                <h3 class="lobby-title">ROUND {{ gameState.round }} SCORES</h3>
+              </div>
+
+              <p class="lobby-subtitle">
+                Round {{ gameState.round }} results
+              </p>
+
+              <ul class="lobby-list-ul"
+                  v-if="gameState.players && gameState.players.length">
+                <li v-for="p in gameState.players"
+                    :key="p.id"
+                    class="status-item">
+                  <span class="status-name">
+                    #{{ p.rank || '?' }} · {{ p.username }}
+                    <span v-if="p.isAdmin">👑</span>
+                    <span v-if="p.username === username"> (you)</span>
+                  </span>
+                  <div class="status-scores">
+                    <small>
+                      This round: {{ p.roundScore || 0 }} · Total: {{ p.score || 0 }}
+                    </small>
+                  </div>
+                </li>
+              </ul>
+
+              <p v-else class="status-empty">
+                No players found.
+              </p>
+
+              <div class="form-group button-row" style="margin-top: 1rem;">
+                <button class="btn btn-primary" v-if="isAdmin" @click="next">
+                  <span v-if="gameState.round < 3">
+                    Start next round
+                  </span>
+                  <span v-else>
+                    Finish game
+                  </span>
+                </button>
+                <small class="text-muted" v-if="!isAdmin">
+                  Waiting for the host to continue.
+                </small>
+              </div>
+            </div>
+
+            <!-- Chat on the right -->
+            <div class="chat-card">
+              <h4 class="chat-title">Game Chat</h4>
+
+              <div class="form-group">
+                <input type="text"
+                       @keyup.enter="chat()"
+                       v-model="chatmessage"
+                       class="form-control"
+                       placeholder="Type a message and press Enter">
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" @click="chat">Send</button>
+              </div>
+
+              <ul id="chat">
+                <li v-for="(m, idx) in messages"
+                    :key="idx"
+                    :class="['chat-message', { 'my-message': m.username === username }]">
+                  <div class="chat-header">
+                    <div class="chat-avatar">
+                      {{ (m.username || '?')[0].toUpperCase() }}
+                    </div>
+                    <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                  </div>
+                  <div class="chat-text">
+                    {{ m.text }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
+          <!-- ============ GAME OVER – FINAL LEADERBOARD ============ -->
+          <div v-else-if="gameState && gameState.stage === 'GAME_OVER'"
+               class="game-stage-wrapper">
+
+            <div class="lobby-card">
+              <div class="lobby-header">
+                <img src="/static/quiplash-logo.png"
+                     alt="Quiplash Logo"
+                     class="game-logo small-logo">
+                <h3 class="lobby-title">GAME OVER</h3>
+              </div>
+
+              <p class="lobby-subtitle">
+                Final leaderboard after {{ gameState.round }} rounds
+              </p>
+
+              <ul class="lobby-list-ul"
+                  v-if="gameState.players && gameState.players.length">
+                <li v-for="p in gameState.players"
+                    :key="p.id"
+                    class="status-item">
+                  <span class="status-name">
+                    #{{ p.rank || '?' }} · {{ p.username }}
+                    <span v-if="p.isAdmin">👑</span>
+                    <span v-if="p.username === username"> (you)</span>
+                  </span>
+                  <div class="status-scores">
+                    <small>
+                      Total score: {{ p.score || 0 }}
+                    </small>
+                  </div>
+                </li>
+              </ul>
+
+              <p v-else class="status-empty">
+                No players found.
+              </p>
+
+              <p class="lobby-text" style="margin-top: 1rem;">
+                Refresh the page to start a fresh game.
+              </p>
+            </div>
+
+            <!-- Chat on the right -->
+            <div class="chat-card">
+              <h4 class="chat-title">Game Chat</h4>
+
+              <div class="form-group">
+                <input type="text"
+                       @keyup.enter="chat()"
+                       v-model="chatmessage"
+                       class="form-control"
+                       placeholder="Type a message and press Enter">
+              </div>
+
+              <div class="form-group">
+                <button class="btn btn-primary" @click="chat">Send</button>
+              </div>
+
+              <ul id="chat">
+                <li v-for="(m, idx) in messages"
+                    :key="idx"
+                    :class="['chat-message', { 'my-message': m.username === username }]">
+                  <div class="chat-header">
+                    <div class="chat-avatar">
+                      {{ (m.username || '?')[0].toUpperCase() }}
+                    </div>
+                    <span class="chat-username">{{ m.username || 'Unknown' }}</span>
+                  </div>
+                  <div class="chat-text">
+                    {{ m.text }}
+                  </div>
+                </li>
+              </ul>
+            </div>
+          </div>
+
 
           <!-- ============ OTHER STAGES PLACEHOLDER ============ -->
           <div v-else class="game-stage-wrapper">
