@@ -500,7 +500,7 @@
         </p>
 
         <p class="lobby-text">
-          Tap the best answer for each prompt. You **cannot** vote for your own answer.
+          Tap the best answer for each prompt. Players **cannot** vote for their own answer or vote more than once per prompt. Audience members can vote freely.
         </p>
 
         <div v-if="gameState.activePrompts && gameState.activePrompts.length">
@@ -538,9 +538,9 @@
                   &nbsp;{{ pl.answers[prompt.id] }}
                 </template>
 
-                <template v-else>
+                <template v-else-if="myPlayer">
                   <button
-                    v-if="!myPlayer || !myPlayer.votesCast || myPlayer.votesCast[prompt.id] === undefined"
+                    v-if="!myPlayer.votesCast || myPlayer.votesCast[prompt.id] === undefined"
                     class="btn btn-primary"
                     @click="castVote(prompt.id, pl.username)"
                   >
@@ -550,6 +550,15 @@
                   <span v-else>
                     {{ pl.answers[prompt.id] }}
                   </span>
+                </template>
+                
+                <template v-else>
+                  <button
+                    class="btn btn-secondary"
+                    @click="castVote(prompt.id, pl.username)"
+                  >
+                    {{ pl.answers[prompt.id] }}
+                  </button>
                 </template>
               </li>
             </ul>

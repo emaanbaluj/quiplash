@@ -1,4 +1,3 @@
-// app.js
 'use strict';
 
 // ===== Imports & Setup =====
@@ -40,6 +39,9 @@ const gameState = {
   players: [],          // Active players in the game
   audience: [],         // Spectators
   activePrompts: [],    // Prompts currently being used in the round
+  // NEW: Dedicated structure for tracking cumulative audience votes per prompt
+  // Format: { [promptId]: { [targetUsername]: count, ... }, ... }
+  audienceVotes: {}, 
 };
 
 // ===== Server Start =====
@@ -159,12 +161,21 @@ function updateAll() {
     status: a.state.status,
   }));
 
+  // Filter activePrompts for public display (only prompt text/id/author)
+  const publicActivePrompts = gameState.activePrompts.map(p => ({
+    id: p.id,
+    text: p.text,
+    author: p.author,
+  }));
+
   io.emit('gameState', {
     stage: gameState.stage,
     round: gameState.round,
     players: publicPlayers,
     audience: publicAudience,
-    activePrompts: gameState.activePrompts,
+    activePrompts: publicActivePrompts,
+    // Note: audienceVotes is NOT sent to clients to minimize data transfer 
+    // and because clients don't need raw vote counts for the UI.
   });
 }
 
@@ -255,6 +266,14 @@ function findUserBySocketId(socketId) {
   );
 }
 
+// Finds a user (player or audience) in the game state by their username.
+function findUserByUsername(username) {
+  return (
+    gameState.players.find(p => p.username === username) ||
+    gameState.audience.find(a => a.username === username)
+  );
+}
+
 // Adds a validated user as a player (if space/stage allows) or as an audience member.
 function addPlayerOrAudience(socket, username) {
   // If the lobby is open and has space, add as a player.
@@ -272,7 +291,7 @@ function addPlayerOrAudience(socket, username) {
         assignedPrompts: [],
         answers: {},
         votesCast: {},
-        roundVotes: 0,
+        roundVotes: 0, // Player votes received from other players
         roundScore: 0,
         prompt: null,
       },
@@ -398,14 +417,12 @@ function allAnswersSubmitted() {
 }
 
 // Checks if every player has submitted vote for every single answer
-
-// Checks if every player has submitted vote for every single answer
 function allVotesSubmitted(){
   if (!gameState.players.length || !gameState.activePrompts.length) return false;
 
   const totalPromptsToVoteOn = gameState.activePrompts.length;
 
-
+  // Only check participating players' votes. Audience votes do not gate the transition.
   return gameState.players.every(p => {
     const votesCast = p.state.votesCast || {};
 
@@ -439,6 +456,7 @@ function startPromptStage() {
   });
 
   gameState.activePrompts = [];
+  gameState.audienceVotes = {}; // Reset audience votes for the new round
   updateAll();
 }
 
@@ -502,22 +520,55 @@ function startVotingStage() {
 function endVotingAndScoreRound() {
   console.log('Ending voting and computing round scores');
 
+  const PLAYER_VOTE_POINTS = 100;
+  const AUDIENCE_VOTE_POINTS = 50; 
+
+  // Reset round scores before calculation
   gameState.players.forEach(p => {
-    const votes = p.state.roundVotes || 0;
-    // Points calculation: round number * votes * 100
-    const points = gameState.round * votes * 100;
-
-    p.state.roundScore = points;
-
-    if (typeof p.score !== 'number') {
-      p.score = 0;
-    }
-    p.score += points;
+    p.state.roundScore = 0;
   });
 
-  gameState.stage = 'SCORING';
+  // 1. Process Player Votes
+  gameState.players.forEach(p => {
+    const votes = p.state.roundVotes || 0; // roundVotes tracks votes received from other players
+    const points = gameState.round * votes * PLAYER_VOTE_POINTS;
+
+    p.state.roundScore += points;
+    p.score = (p.score || 0) + points;
+  });
+
+
+  // 2. Process Audience Votes
+  for (const promptId in gameState.audienceVotes) {
+    const votesByPlayer = gameState.audienceVotes[promptId];
+    
+    for (const targetUsername in votesByPlayer) {
+      const voteCount = votesByPlayer[targetUsername];
+      const targetPlayer = gameState.players.find(p => p.username === targetUsername);
+
+      if (targetPlayer) {
+        // Award points based on the number of audience votes
+        const points = voteCount * AUDIENCE_VOTE_POINTS;
+        targetPlayer.state.roundScore += points;
+        targetPlayer.score = (targetPlayer.score || 0) + points;
+
+        console.log(`[SCORING] Player ${targetUsername} received ${voteCount} audience votes (${points} points) for prompt ${promptId}.`);
+      }
+    }
+  }
+
+  // Final stage transition
+  if (gameState.round >= 3) {
+    gameState.stage = 'GAME_OVER';
+  } else {
+    gameState.stage = 'SCORING';
+  }
+
   updateAll();
 }
+// -----------------------------
+// ... (Game Flow Helpers continue)
+// -----------------------------
 
 // ===== Start Game (JOINING → PROMPTS) =====
 
@@ -542,11 +593,6 @@ async function handleStartGame(socket) {
 }
 
 // ===== Advance Game (PROMPTS → ANSWERS → VOTING → SCORING → next round / GAME_OVER) =====
-
-// Manages the flow of the game between stages, triggered only by the host.
-// app.js (updated handleAdvanceGame)
-
-// ... (other functions)
 
 // Manages the flow of the game between stages, triggered only by the host.
 function handleAdvanceGame(socket) {
@@ -676,7 +722,8 @@ async function handlePrompt(socket, data) {
 // Handles a player's answer submission for an assigned prompt.
 async function handleAnswer(socket, data) {
   const user = findUserBySocketId(socket.id);
-  if (!user || gameState.stage !== 'ANSWERS' || !data || !data.text || data.promptId === undefined) {
+  // Check if user is a player and in the correct stage
+  if (!user || user.state.status === 'AUDIENCE' || gameState.stage !== 'ANSWERS' || !data || !data.text || data.promptId === undefined) {
     socket.emit('answerResult', { result: false, msg: 'Invalid answer or not the answer stage.' });
     return;
   }
@@ -707,36 +754,57 @@ async function handleAnswer(socket, data) {
   }
 }
 
-// ===== Voting Handling =====
+// ===== Voting Handling (Updated for Audience) =====
 
-// Handles a player's vote for an answer, ensuring they don't vote for themselves or multiple times.
+// Handles a vote, differentiating between Player (single vote) and Audience (multiple votes).
 function handleVote(socket, data) {
   const user = findUserBySocketId(socket.id);
   if (!user || gameState.stage !== 'VOTING' || !data || data.promptId === undefined) {
-    socket.emit('voteResult', { result: false, msg: 'Invalid vote or not in voting stage.' });
-    return;
+    return socket.emit('voteResult', { result: false, msg: 'Invalid vote or not in voting stage.' });
   }
 
   const promptId = data.promptId;
   const targetUsername = data.targetUsername || data.answerId;
 
+  // Ensure the target is a player who submitted an answer
   const targetPlayer = gameState.players.find(p => p.username === targetUsername);
-  if (!targetPlayer || targetPlayer.username === user.username) {
-    socket.emit('voteResult', { result: false, msg: 'Cannot vote for yourself or invalid target.' });
-    return;
+  if (!targetPlayer) {
+    return socket.emit('voteResult', { result: false, msg: 'Invalid target player.' });
   }
 
-  user.state.votesCast = user.state.votesCast || {};
-  if (user.state.votesCast[promptId]) {
-    socket.emit('voteResult', { result: false, msg: 'You already voted on this prompt.' });
-    return;
+  // Global rule: Cannot vote for yourself
+  if (targetPlayer.username === user.username) {
+    return socket.emit('voteResult', { result: false, msg: 'Cannot vote for yourself.' });
   }
 
-  // Record vote and increment target's vote count
-  user.state.votesCast[promptId] = targetPlayer.username;
-  targetPlayer.state.roundVotes = (targetPlayer.state.roundVotes || 0) + 1;
+  // --- Player Logic ---
+  const votingPlayer = gameState.players.find(p => p.username === user.username);
+  if (votingPlayer) {
+    // Player Rule: Only one vote per prompt
+    votingPlayer.state.votesCast = votingPlayer.state.votesCast || {};
+    if (votingPlayer.state.votesCast[promptId]) {
+      return socket.emit('voteResult', { result: false, msg: 'You already voted on this prompt.' });
+    }
 
-  socket.emit('voteResult', { result: true, msg: 'Vote recorded.' });
+    // Record vote and increment target's player-vote count
+    votingPlayer.state.votesCast[promptId] = targetPlayer.username;
+    targetPlayer.state.roundVotes = (targetPlayer.state.roundVotes || 0) + 1;
+    
+    socket.emit('voteResult', { result: true, msg: 'Vote recorded.' });
+
+  } 
+  // --- Audience Logic ---
+  else {
+    // Audience Rule: Can vote multiple times, votes are tracked separately
+    
+    // Initialize structure if necessary
+    gameState.audienceVotes[promptId] = gameState.audienceVotes[promptId] || {};
+    gameState.audienceVotes[promptId][targetUsername] = 
+      (gameState.audienceVotes[promptId][targetUsername] || 0) + 1;
+      
+    socket.emit('voteResult', { result: true, msg: 'Audience vote recorded.' });
+  }
+
   updateAll();
 }
 
@@ -768,6 +836,7 @@ io.on('connection', socket => {
   socket.on('disconnect', () => {
     console.log('Dropped connection:', socket.id);
 
+    // Filter by socketId
     gameState.players = gameState.players.filter(p => p.socketId !== socket.id);
     gameState.audience = gameState.audience.filter(a => a.socketId !== socket.id);
 

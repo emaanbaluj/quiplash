@@ -43,6 +43,7 @@ var app = new Vue({
     // Convenience: find THIS player in gameState.players
     myPlayer() {
       if (!this.gameState || !this.gameState.players) return null;
+      // If the player is in the 'players' array, they are a participating player.
       return this.gameState.players.find(p => p.username === this.username) || null;
     },
 
@@ -261,14 +262,15 @@ function connect() {
       app.errorMessage = res.msg || 'Vote cast!';
       app.isPositiveMessage = true;
 
-      // CRITICAL FIX: If the vote succeeded, update the local player state
-      // This forces the UI to refresh, disabling buttons and showing (Voted)
+      // CRITICAL LOGIC UPDATE: Track vote for PLAYERS only
+      // Audience votes aren't tracked here, as the server handles their vote counts
+      // and they don't lose the ability to vote on other answers/prompts.
       if (app.myPlayer && res.promptId !== undefined) {
           if (!app.myPlayer.votesCast) {
-              app.myPlayer.votesCast = {};
+              // Use Vue.set for reactivity when adding a new property to an object
+              Vue.set(app.myPlayer, 'votesCast', {});
           }
-          // Use Vue.set for reactivity when adding a new property to an object
-          // This assumes the server's res includes 'promptId'
+          // Set the vote for the specific prompt to disable buttons
           Vue.set(app.myPlayer.votesCast, res.promptId, res.answerId || 'voted');
       }
 
